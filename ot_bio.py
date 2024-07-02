@@ -15,10 +15,9 @@ epochs = 1000000
 device = 'cuda:0'
 ### batch_size <= min(X1[0], X2[0])
 batch_size = 8000
-
 citeseq = anndata.read_h5ad("/workspace/ImputationOT/citeseq_processed-001.h5ad")
-# print(type(citeseq.X))
 
+### TODO: 检查 X 的数据格式，是否是稀疏矩阵？
 X = citeseq.X.toarray()
 X = np.log1p(X)
 X = torch.tensor(X).to(device)
