@@ -1,112 +1,77 @@
-import torch
-import anndata
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
 import ot
-import random
-import geomloss
+import sys
+# import wandb
+import anndata
+import scipy.stats as stats
+from scipy.stats import pearsonr
+from fancyimpute import KNN, NuclearNormMinimization, SoftImpute, BiScaler, SimpleFill
 
 
-from geomloss import SamplesLoss
+epochs = 1000000
+device = 'cuda:0'
+### batch_size <= min(X1[0], X2[0])
+batch_size = 8000
 
-# Hyperparameters setting
-
-n_iters = 100
-eps = 1e-5
-scaling = 1
-
-citeseq = anndata.read_h5ad("/workspace/citeseq_processed-001.h5ad")
-
-def zeromean(X, dim):
-    # 创建一个掩码，标记出非零元素的位置
-    nonzero_mask = X != 0
-    
-    # 用 0 替换张量中原来的零元素
-    X_nonzero = X.clone()
-    X_nonzero[~nonzero_mask] = 0
-    
-    # 计算非零元素的个数
-    count_nonzero = nonzero_mask.sum(dim=dim, keepdim=True).float()
-    
-    # 计算非零元素的和
-    sum_nonzero = X_nonzero.sum(dim=dim, keepdim=True)
-    
-    # 计算均值，忽略零值
-    mean_nonzero = sum_nonzero / count_nonzero
-    
-    return mean_nonzero.squeeze(dim)
+citeseq = anndata.read_h5ad("/workspace/ImputationOT/citeseq_processed-001.h5ad")
+# print(type(citeseq.X))
 
 X = citeseq.X.toarray()
-X = torch.tensor(X)
+X = np.log1p(X)
+X = torch.tensor(X).to(device)
+X = X[:41482]    # data in site1, site2
 ground_truth = X.clone()
 
 gex_indices = np.where(citeseq.var['feature_types'] == 'GEX')[0]
 adt_indices = np.where(citeseq.var['feature_types'] == 'ADT')[0]
-GEX = X[:, gex_indices] # AnnData object with n_obs × n_vars = 69249 × 13953
-ADT = X[:, adt_indices] # AnnData object with n_obs × n_vars = 69249 × 134
+GEX = X[:41482, gex_indices] # AnnData object with n_obs × n_vars = 41482 × 13953
+ADT = X[:41482, adt_indices] # AnnData object with n_obs × n_vars = 41482 × 134
 
 site1_indices = np.where(citeseq.obs['Site'] == 'site1')[0]
 site2_indices = np.where(citeseq.obs['Site'] == 'site2')[0]
 X1 = X[site1_indices, :] # AnnData object with n_obs × n_vars = 16311 × 14087
 X2 = X[site2_indices, :] # AnnData object with n_obs × n_vars = 25171 × 14087
 
-# 只填补0数据 - 无法评估
-# mask = (X[site1_indices, :][:, adt_indices] == 0).double()
-# imps = (0.1 * torch.randn(mask.shape).double() + zeromean(X[site2_indices, :][:, adt_indices], 0).repeat(len(site1_indices), 1))[mask.bool()].float()
+### 把已有数据也当作0数据进行全面填补
+mask = torch.ones((41482, 14087), dtype=torch.bool).to(device)
+mask[:16311, :13953] = False   # mask X(1,1)
+mask = ~mask
 
-# 把已有数据也当作0数据进行全面填补
-imps = (0.1 * torch.randn(X[site1_indices, :][:, adt_indices].shape).double() + zeromean(X[site2_indices, :][:, adt_indices], 0).repeat(len(site1_indices), 1)).float()
+nonzero_mask = (X[:16311, :13953] != 0).to(device)   # nonzero data of X(1,1)
+nonzero_mask2 = (X[:16311, 13953:] != 0).to(device)   # nonzero data of X(1,2)
+
+mean_values = torch.sum(X[:16311, 13953:] * nonzero_mask2, dim=1) / torch.sum(nonzero_mask, dim=1)
+imps = mean_values.repeat(13953).to(device)   # shape = [16311, 13953]
 imps.requires_grad = True
-
-# Impute data & calculate loss
-# X: inpute gene-cell matrix
-
-optimizer = torch.optim.Adam([imps])
-loss = 0
-        
-# Method: distance between D1, D2 + distance between GEX, ADT
-
-def pearson(A, B):
-    # Step 1: 计算均值
-    mean_A = torch.mean(A, dim=0)
-    mean_B = torch.mean(B, dim=0)
-    
-    # Step 2: 中心化数据
-    A_centered = A - mean_A
-    B_centered = B - mean_B
-    
-    # Step 3: 计算协方差
-    covariance = torch.sum(A_centered * B_centered, dim=0)
-    
-    # Step 4: 计算标准差
-    std_A = torch.sqrt(torch.sum(A_centered ** 2, dim=0))
-    std_B = torch.sqrt(torch.sum(B_centered ** 2, dim=0))
-    
-    # Step 5: 计算 Pearson 相似分数
-    pearson_score = covariance / (std_A * std_B)
-    
-    return pearson_score.mean()
+# imps = torch.ones(mask.sum(), device=device, requires_grad=True)
+optimizer = optim.Adam([imps])
 
 print("start optimizing")
-for i in range(n_iters):
-    loss = 0
-    X_imputed = X.detach().clone()
-    assert X.dtype == imps.dtype, "dtype of X and imps should match"
-    X_imputed[:16311, 13953:] = imps
+with open('results_bio.txt', 'w') as f:
+    for epoch in range(epochs):
+        X_imputed = X.detach().clone()
+        X_imputed[mask] = imps
 
-    # print(MAE(imps, ground_truth[:16311, 13953:], mask).data)
+        indices1 = torch.randperm(16311 // 2, device=device)[:batch_size]
+        X1 = X_imputed[:16311, :][indices1, :]
+        X2 = X_imputed[16311:, :][indices1, :]
 
-    X1 = X_imputed[16211:16311, 13752:]
-    X2 = X_imputed[16311:16411, 13752:]
-    # GEX = X_imputed[:, :1]
-    # ADT = X_imputed[:, -1:]
-    assert X1.shape == X2.shape, "shape of X1 and X2 do not match"
-    # assert GEX.shape == ADT.shape, "shape of GEX and ADT do not match"
+        indices2 = torch.randperm(13953, device=device)[:134]
+        GEX = X_imputed[:, indices2]
+        ADT = X_imputed[:, -134:]
+        loss = 0.5 * ot.sliced_wasserstein_distance(X1, X2) + 0.5 * ot.sliced_wasserstein_distance(GEX, ADT)
 
-    loss += SamplesLoss("sinkhorn", p=2)(X1, X2)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+        X_imputed = X.detach().clone()
+        X_imputed[mask] = imps
 
-    print(f"Iteration {i + 1}/{n_iters}: loss = {loss.item()}")
-    print(pearson(imps, ground_truth[:16311, 13953:]).item())
+        if (epoch + 1) % 100 == 0:
+            pearson_corr = pearsonr(X_imputed[:16311, :13953][nonzero_mask].detach().cpu().numpy(), ground_truth[:16311, :13953][nonzero_mask].detach().cpu().numpy())[0]
+            f.write(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:4f}\n")
+            f.flush()

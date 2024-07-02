@@ -7,7 +7,6 @@ import sys
 import wandb
 import scipy.stats as stats
 from scipy.stats import pearsonr
-from geomloss import SamplesLoss
 
 # wandb.init(project="ot11037",
 #            name="ot_toy",)
