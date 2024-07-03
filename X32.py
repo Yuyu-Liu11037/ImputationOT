@@ -51,14 +51,15 @@ imps.requires_grad = True
 optimizer = optim.Adam([imps])
 
 print("start optimizing")
+loss = .0
 with open('results_bio.txt', 'w') as f:
     for epoch in range(epochs):
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
 
         if epoch == 0:
-            pearson_corr = pearsonr(X_imputed[-16750:, :13953][nonzero_mask41].detach().cpu().numpy(), ground_truth[-16750:, :13953][nonzero_mask41].detach().cpu().numpy())[0]
-            f.write(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}\n")
+            pearson_corr = pearsonr(X_imputed[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy(), ground_truth[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy())[0]
+            f.write(f"Iteration {epoch + 1}/{epochs}: loss: {loss:.4f}, pearson: {pearson_corr:.4f}\n")
             f.flush()
 
         indices1 = torch.randperm(len(site1_indices) + len(site2_indices), device=device)[:batch_size]
@@ -79,10 +80,11 @@ with open('results_bio.txt', 'w') as f:
         X_imputed[mask] = imps
 
         if (epoch + 1) % 100 == 0:
-            pearson_corr = pearsonr(X_imputed[-16750:, :13953][nonzero_mask41].detach().cpu().numpy(), ground_truth[-16750:, :13953][nonzero_mask41].detach().cpu().numpy())[0]
+            pearson_corr = pearsonr(X_imputed[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy(), ground_truth[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy())[0]
             f.write(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}\n")
             f.flush()
-            
-X_imputed = np.expm1(X_imputed) 
-np.save('X_imputed.npy', X_imputed.detach().cpu().numpy())
-np.save('ground_truth.npy', ground_truth.detach().cpu().numpy())
+
+        if (epoch + 1) % 3000 == 0:
+            X_imputed = np.expm1(X_imputed.detach().cpu().numpy()) 
+            np.save('X_imputed.npy', X_imputed)
+            np.save('ground_truth.npy', ground_truth.cpu().numpy())
