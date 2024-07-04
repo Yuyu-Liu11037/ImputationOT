@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.optim as optim
 import ot
 import sys
-# import wandb
 import anndata
 import scipy.stats as stats
 from scipy.stats import pearsonr
@@ -19,9 +18,9 @@ batch_size = 10000
 citeseq = anndata.read_h5ad("./data/citeseq_processed-001.h5ad")
 
 X = citeseq.X.toarray()
-X = np.log1p(X)
 X = torch.tensor(X).to(device)
 X = X[:41482]    # data in site1, site2
+X = torch.clamp(X, max=200)
 ground_truth = X.clone()
 
 gex_indices = np.where(citeseq.var['feature_types'] == 'GEX')[0]
@@ -41,8 +40,8 @@ mask = ~mask
 nonzero_mask = (X[:16311, :13953] != 0).to(device)   # nonzero data of X(1,1)
 nonzero_mask2 = (X[:16311, 13953:] != 0).to(device)   # nonzero data of X(1,2)
 
-mean_values = torch.sum(X[:16311, :13953] * nonzero_mask, dim=1) / torch.sum(nonzero_mask2, dim=1)
-imps = mean_values.repeat(134).to(device)   # shape = [16311, 13953]
+mean_values = torch.sum(X[:16311, :13953], dim=1) / torch.sum(nonzero_mask, dim=1)
+imps = mean_values.repeat(134).to(device)   # shape = [16311, 134]
 imps.requires_grad = True
 
 optimizer = optim.Adam([imps])

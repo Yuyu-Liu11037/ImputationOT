@@ -1,0 +1,6 @@
+Iteration 100/100000: loss: 3.0962, pearson: 0.0316
+Iteration 200/100000: loss: 4.6814, pearson: 0.0621
+Iteration 300/100000: loss: 2.6887, pearson: 0.0898
+Iteration 400/100000: loss: 3.2019, pearson: 0.1159
+Iteration 500/100000: loss: 2.6614, pearson: 0.1398
+Iteration 600/100000: loss: 3.0888, pearson: 0.1617

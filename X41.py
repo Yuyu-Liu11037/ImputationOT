@@ -48,8 +48,8 @@ mask = ~mask
 # nonzero_mask32 = (X[site3_indices, :][:, adt_indices] != 0).to(device)   # nonzero data of X(3,2)
 nonzero_mask41 = (X[-16750:, :][:, gex_indices] != 0).to(device)   # nonzero data of X(4,1)
 nonzero_mask42 = (X[-16750:, :][:, adt_indices] != 0).to(device)   # nonzero data of X(4,2)
-mean_values = torch.sum(X[-16750:, 13953:] * nonzero_mask42, dim=1) / torch.sum(nonzero_mask41, dim=1)
-imps = mean_values.repeat(len(gex_indices)).to(device)
+mean_values = torch.sum(X[-16750:, 13953:], dim=1) / torch.sum(nonzero_mask42, dim=1)
+imps = mean_values.repeat(13953).to(device)
 imps.requires_grad = True
 
 optimizer = optim.Adam([imps])
