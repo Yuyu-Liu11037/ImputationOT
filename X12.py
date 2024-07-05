@@ -33,11 +33,10 @@ site2_indices = np.where(citeseq.obs['Site'] == 'site2')[0]
 X1 = X[site1_indices, :] # AnnData object with n_obs × n_vars = 16311 × 14087
 X2 = X[site2_indices, :] # AnnData object with n_obs × n_vars = 25171 × 14087
 
-mask = torch.ones((41482, 14087), dtype=torch.bool).to(device)
-mask[:16311, 13953:] = False   # mask X(1,2)
-mask = ~mask
+mask = torch.zeros((41482, 14087), dtype=torch.bool).to(device)
+mask[:16311, 13953:] = True   # mask X(1,2)
 
-nonzero_mask = (X[:16311, :13953] != 0).to(device)   # nonzero data of X(1,1)
+nonzero_mask  = (X[:16311, :13953] != 0).to(device)   # nonzero data of X(1,1)
 nonzero_mask2 = (X[:16311, 13953:] != 0).to(device)   # nonzero data of X(1,2)
 
 mean_values = torch.sum(X[:16311, :13953], dim=1) / torch.sum(nonzero_mask, dim=1)
@@ -60,7 +59,8 @@ with open('results_bio.txt', 'w') as f:
         indices3 = torch.randperm(13953, device=device)[:134]
         GEX = X_imputed[:, indices3]
         ADT = X_imputed[:, -134:]
-        loss = 0.5 * ot.sliced_wasserstein_distance(X1, X2) + 0.5 * ot.sliced_wasserstein_distance(GEX, ADT)
+        # loss = 0.9 * ot.sliced_wasserstein_distance(X1, X2) + 0.1 * ot.sliced_wasserstein_distance(GEX, ADT)
+        loss = ot.sliced_wasserstein_distance(X1, X2)
 
         optimizer.zero_grad()
         loss.backward()
@@ -69,7 +69,7 @@ with open('results_bio.txt', 'w') as f:
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
 
-        if (epoch + 1) % 100 == 0:
+        if (epoch + 1) % 200 == 0:
             pearson_corr = pearsonr(X_imputed[:16311, 13953:][nonzero_mask2].detach().cpu().numpy(), ground_truth[:16311, 13953:][nonzero_mask2].detach().cpu().numpy())[0]
             f.write(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}\n")
             f.flush()
