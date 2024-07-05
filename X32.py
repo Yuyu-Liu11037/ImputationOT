@@ -18,8 +18,8 @@ batch_size = 6000
 citeseq = anndata.read_h5ad("./data/citeseq_processed-001.h5ad")
 
 X = citeseq.X.toarray()
-X = np.log1p(X)
 X = torch.tensor(X).to(device)
+X = torch.clamp(X, max=200)
 X = X[:73511]   # Matrix is too large. Remove certain rows to save memory.
 ground_truth = X.clone()
 
@@ -36,22 +36,22 @@ X2 = X[site2_indices, :] # AnnData object with n_obs × n_vars = 25171 × 14087
 # X3 = X[site3_indices, :] # AnnData object with n_obs × n_vars = 32029 × 14087
 # X4 = X[site4_indices, :] # AnnData object with n_obs × n_vars = 16750 × 14087
 
-mask = torch.ones(X.shape, dtype=torch.bool).to(device)
+mask = torch.zeros(X.shape, dtype=torch.bool).to(device)
 # TODO: 前一种编码的问题？
-# mask[site3_indices, :][:, adt_indices] = False   # mask X(3,2)
-mask[41482:73511, 13953:] = False   # mask X(3,2)
-mask = ~mask
+# mask[site3_indices, :][:, adt_indices] = True   # mask X(3,2)
+mask[41482:73511, 13953:] = True   # mask X(3,2)
 
+nonzero_mask1222 = (X[:41482, 13953:] != 0).to(device)   # nonzero data of X(1,2), X(2,2)
 nonzero_mask31 = (X[-32029:, :13953] != 0).to(device)   # nonzero data of X(3,1)
 nonzero_mask32 = (X[-32029:, 13953:] != 0).to(device)   # nonzero data of X(3,2)
-mean_values = torch.sum(X[-32029:, :13953] * nonzero_mask31, dim=1) / torch.sum(nonzero_mask32, dim=1)
-imps = mean_values.repeat(134).to(device)
+mean_values = torch.sum(X[:41482, 13953:], dim=0) / torch.sum(nonzero_mask1222, dim=0)
+imps = mean_values.repeat(32029).to(device)
+imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-optimizer = optim.Adam([imps])
+optimizer = optim.Adam([imps], lr=0.1)
 
 print("start optimizing")
-loss = .0
 with open('results_bio.txt', 'w') as f:
     for epoch in range(epochs):
         X_imputed = X.detach().clone()
@@ -59,7 +59,7 @@ with open('results_bio.txt', 'w') as f:
 
         if epoch == 0:
             pearson_corr = pearsonr(X_imputed[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy(), ground_truth[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy())[0]
-            f.write(f"Iteration {epoch + 1}/{epochs}: loss: {loss:.4f}, pearson: {pearson_corr:.4f}\n")
+            f.write(f"pearson: {pearson_corr:.4f}\n")
             f.flush()
 
         indices1 = torch.randperm(len(site1_indices) + len(site2_indices), device=device)[:batch_size]
@@ -67,10 +67,11 @@ with open('results_bio.txt', 'w') as f:
         indices3 = torch.randperm(32029, device=device)[:batch_size]
         X3 = X_imputed[-32029:, :][indices3, :]
 
-        indices2 = torch.randperm(len(gex_indices), device=device)[:134]
-        GEX = X_imputed[:, indices2]
-        ADT = X_imputed[:, -134:]
-        loss = 0.5 * ot.sliced_wasserstein_distance(X12, X3) + 0.5 * ot.sliced_wasserstein_distance(GEX, ADT)
+        # indices2 = torch.randperm(len(gex_indices), device=device)[:134]
+        # GEX = X_imputed[:, indices2]
+        # ADT = X_imputed[:, -134:]
+        # loss = 0.5 * ot.sliced_wasserstein_distance(X12, X3) + 0.5 * ot.sliced_wasserstein_distance(GEX, ADT)
+        loss = ot.sliced_wasserstein_distance(X12, X3)
 
         optimizer.zero_grad()
         loss.backward()
@@ -79,12 +80,12 @@ with open('results_bio.txt', 'w') as f:
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
 
-        if (epoch + 1) % 100 == 0:
+        if (epoch + 1) % 200 == 0:
             pearson_corr = pearsonr(X_imputed[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy(), ground_truth[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy())[0]
             f.write(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}\n")
             f.flush()
 
-        if (epoch + 1) % 3000 == 0:
-            X_imputed = np.expm1(X_imputed.detach().cpu().numpy()) 
-            np.save('X_imputed.npy', X_imputed)
-            np.save('ground_truth.npy', ground_truth.cpu().numpy())
+        # if (epoch + 1) % 3000 == 0:
+        #     X_imputed = np.expm1(X_imputed.detach().cpu().numpy()) 
+        #     np.save('X_imputed.npy', X_imputed)
+        #     np.save('ground_truth.npy', ground_truth.cpu().numpy())

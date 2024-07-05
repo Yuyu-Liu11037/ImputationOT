@@ -13,7 +13,7 @@ from fancyimpute import KNN, NuclearNormMinimization, SoftImpute, BiScaler, Simp
 epochs = 100000
 device = 'cuda:0'
 ### batch_size <= min(X1[0], X2[0])
-batch_size = 10000
+batch_size = 16000
 
 citeseq = anndata.read_h5ad("./data/citeseq_processed-001.h5ad")
 
@@ -38,33 +38,43 @@ mask[:16311, 13953:] = True   # mask X(1,2)
 
 nonzero_mask  = (X[:16311, :13953] != 0).to(device)   # nonzero data of X(1,1)
 nonzero_mask2 = (X[:16311, 13953:] != 0).to(device)   # nonzero data of X(1,2)
+nonzero_mask4 = (X[16311:, 13953:] != 0).to(device)   # nonzero data of X(2,2)
 
-mean_values = torch.sum(X[:16311, :13953], dim=1) / torch.sum(nonzero_mask, dim=1)
-imps = mean_values.repeat(134).to(device)   # shape = [16311, 134]
+# mean_values = torch.sum(X[:16311, :13953], dim=1) / torch.sum(nonzero_mask, dim=1)
+# imps = mean_values.repeat(134).to(device)   # shape = [16311, 134]
+mean_values = torch.sum(X[16311:, 13953:], dim=0) / torch.sum(nonzero_mask4, dim=0)
+imps = mean_values.repeat(16311).to(device)   # shape = [16311, 134]
+imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-optimizer = optim.Adam([imps])
+optimizer = optim.Adam([imps], lr=0.1)
+lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
+scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
 print("start optimizing")
 with open('results_bio.txt', 'w') as f:
     for epoch in range(epochs):
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
+        if epoch == 0:
+            pearson_corr = pearsonr(X_imputed[:16311, 13953:][nonzero_mask2].detach().cpu().numpy(), ground_truth[:16311, 13953:][nonzero_mask2].detach().cpu().numpy())[0]
+            print(pearson_corr)
 
         indices1 = torch.randperm(16311, device=device)[:batch_size]
         X1 = X_imputed[:16311, :][indices1, :]
         indices2 = torch.randperm(25171, device=device)[:batch_size]
         X2 = X_imputed[16311:, :][indices2, :]
 
-        indices3 = torch.randperm(13953, device=device)[:134]
-        GEX = X_imputed[:, indices3]
-        ADT = X_imputed[:, -134:]
-        # loss = 0.9 * ot.sliced_wasserstein_distance(X1, X2) + 0.1 * ot.sliced_wasserstein_distance(GEX, ADT)
+        # indices3 = torch.randperm(13953, device=device)[:134]
+        # GEX = X_imputed[:, indices3]
+        # ADT = X_imputed[:, -134:]
+        # loss = 0.5 * ot.sliced_wasserstein_distance(X1, X2) + 0.5 * ot.sliced_wasserstein_distance(GEX, ADT)
         loss = ot.sliced_wasserstein_distance(X1, X2)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
