@@ -14,14 +14,14 @@ wandb.init(
 
     config={
     "dataset": "NIPS2021-Cite-seq",
-    "epochs": 100000,
+    "epochs": 1000000,
     }
 )
 
-epochs = 100000
+epochs = 1000000
 device = 'cuda:0'
 
-citeseq = anndata.read_h5ad("./data/GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad")
+citeseq = anndata.read_h5ad("./../data/GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad")
 citeseq.var_names_make_unique()
 
 ### preprocess
@@ -50,14 +50,14 @@ X = X[:41482]    # data in site1, site2
 ground_truth = X.clone()
 
 mask = torch.zeros((41482, 2134), dtype=torch.bool).to(device)
-mask[:16311, 2000:] = True   # mask X(1,2)
+mask[:16311, :2000] = True   # mask X(1,1)
 
 nonzero_mask  = (X[:16311, :2000] != 0).to(device)   # nonzero data of X(1,1)
 nonzero_mask2 = (X[:16311, 2000:] != 0).to(device)   # nonzero data of X(1,2)
-nonzero_mask4 = (X[16311:, 2000:] != 0).to(device)   # nonzero data of X(2,2)
+nonzero_mask3 = (X[16311:, :2000] != 0).to(device)   # nonzero data of X(2,1)
 
-mean_values = torch.sum(X[16311:, 2000:], dim=0) / torch.sum(nonzero_mask4, dim=0)
-imps = mean_values.repeat(16311).to(device)   # shape = [16311, 134]
+mean_values = torch.sum(X[16311:, :2000], dim=0) / torch.sum(nonzero_mask3, dim=0)
+imps = mean_values.repeat(16311).to(device)   # shape = [16311, 2000]
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
@@ -71,7 +71,7 @@ with open('results_bio.txt', 'w') as f:
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
         if epoch == 0:
-            pearson_corr = pearsonr(X_imputed[:16311, 2000:][nonzero_mask2].detach().cpu().numpy(), ground_truth[:16311, 2000:][nonzero_mask2].detach().cpu().numpy())[0]
+            pearson_corr = pearsonr(X_imputed[:16311, :2000][nonzero_mask].detach().cpu().numpy(), ground_truth[:16311, :2000][nonzero_mask].detach().cpu().numpy())[0]
             f.write(f"Initial pearson: {pearson_corr:.4f}\n")
             f.flush()
 
@@ -80,7 +80,7 @@ with open('results_bio.txt', 'w') as f:
         GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
         ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
         loss = 0.5 * ot.sliced_wasserstein_distance(X1, X2) + 0.5 * ot.sliced_wasserstein_distance(GEX, ADT)
-        
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -90,7 +90,7 @@ with open('results_bio.txt', 'w') as f:
         X_imputed[mask] = imps
 
         if (epoch + 1) % 200 == 0:
-            pearson_corr = pearsonr(X_imputed[:16311, 2000:][nonzero_mask2].detach().cpu().numpy(), ground_truth[:16311, 2000:][nonzero_mask2].detach().cpu().numpy())[0]
+            pearson_corr = pearsonr(X_imputed[:16311, :2000][nonzero_mask].detach().cpu().numpy(), ground_truth[:16311, :2000][nonzero_mask].detach().cpu().numpy())[0]
             wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr})
             f.write(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}\n")
             f.flush()
