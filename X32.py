@@ -5,36 +5,41 @@ import torch.optim as optim
 import ot
 import sys
 import anndata
-import scipy.stats as stats
+import scanpy as sc
 from scipy.stats import pearsonr
-from fancyimpute import KNN, NuclearNormMinimization, SoftImpute, BiScaler, SimpleFill
-
 
 epochs = 100000
 device = 'cuda:0'
 ### batch_size <= min(X3[0], X4[0])
 batch_size = 6000
 
-citeseq = anndata.read_h5ad("./data/citeseq_processed-001.h5ad")
+citeseq = anndata.read_h5ad("./data/GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad")
+citeseq.var_names_make_unique()
+
+### preprocess
+### step 1
+adata_GEX = citeseq[:, citeseq.var['feature_types'] == 'GEX'].copy()
+adata_ADT = citeseq[:, citeseq.var['feature_types'] == 'ADT'].copy()
+sc.pp.normalize_total(adata_GEX, target_sum=1e4)
+sc.pp.normalize_total(adata_ADT, target_sum=1e4)
+citeseq.X[:, citeseq.var['feature_types'] == 'GEX'] = adata_GEX.X
+citeseq.X[:, citeseq.var['feature_types'] == 'ADT'] = adata_ADT.X
+### step 2
+sc.pp.log1p(citeseq)
+### step 3
+adata_GEX = citeseq[:, citeseq.var['feature_types'] == 'GEX'].copy()
+sc.pp.highly_variable_genes(
+    adata_GEX,
+    n_top_genes=2000,
+    subset=True
+)
+highly_variable_genes_mask = adata_GEX.var['highly_variable']
+citeseq = citeseq[:, (citeseq.var['feature_types'] == 'ADT') | highly_variable_genes_mask]
 
 X = citeseq.X.toarray()
 X = torch.tensor(X).to(device)
-X = torch.clamp(X, max=200)
 X = X[:73511]   # Matrix is too large. Remove certain rows to save memory.
 ground_truth = X.clone()
-
-gex_indices = np.where(citeseq.var['feature_types'] == 'GEX')[0]
-adt_indices = np.where(citeseq.var['feature_types'] == 'ADT')[0]
-GEX = X[:, :13953] # AnnData object with n_obs × n_vars = 73511 × 13953
-ADT = X[:, 13953:] # AnnData object with n_obs × n_vars = 73511 × 134
-site1_indices = np.where(citeseq.obs['Site'] == 'site1')[0]
-site2_indices = np.where(citeseq.obs['Site'] == 'site2')[0]
-site3_indices = np.where(citeseq.obs['Site'] == 'site3')[0]
-site4_indices = np.where(citeseq.obs['Site'] == 'site4')[0]
-X1 = X[site1_indices, :] # AnnData object with n_obs × n_vars = 16311 × 14087
-X2 = X[site2_indices, :] # AnnData object with n_obs × n_vars = 25171 × 14087
-# X3 = X[site3_indices, :] # AnnData object with n_obs × n_vars = 32029 × 14087
-# X4 = X[site4_indices, :] # AnnData object with n_obs × n_vars = 16750 × 14087
 
 mask = torch.zeros(X.shape, dtype=torch.bool).to(device)
 # TODO: 前一种编码的问题？
@@ -84,8 +89,3 @@ with open('results_bio.txt', 'w') as f:
             pearson_corr = pearsonr(X_imputed[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy(), ground_truth[-32029:, 13953:][nonzero_mask32].detach().cpu().numpy())[0]
             f.write(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}\n")
             f.flush()
-
-        # if (epoch + 1) % 3000 == 0:
-        #     X_imputed = np.expm1(X_imputed.detach().cpu().numpy()) 
-        #     np.save('X_imputed.npy', X_imputed)
-        #     np.save('ground_truth.npy', ground_truth.cpu().numpy())
