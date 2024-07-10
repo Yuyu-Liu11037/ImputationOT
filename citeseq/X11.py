@@ -135,7 +135,7 @@ def clustering(
 
     return f"{clustering_method}_{best_res}", best_ari, best_nmi
 
-scanpy.pp.neighbors(citeseq)
+sc.pp.neighbors(citeseq)
 print(clustering(citeseq, np.arange(0.75, 2, 0.1)))
 sys.exit()
 

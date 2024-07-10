@@ -34,6 +34,7 @@ multiome.var_names_make_unique()
 adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
 adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
 sc.pp.normalize_total(adata_GEX, target_sum=1e4)
+### error: matrix too large, exceeding float32
 sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
 citeseq.X[:, multiome.var['feature_types'] == 'GEX'] = adata_GEX.X
 citeseq.X[:, multiome.var['feature_types'] == 'ATAC'] = adata_ATAC.X
@@ -73,8 +74,6 @@ mask[-14556:, 8000:] = True   # mask X(3,2)
 nonzero_mask1222 = (X[:32469, 8000:] != 0).to(device)   # nonzero data of X(1,2), X(2,2)
 nonzero_mask31 = (X[-14556:, :8000] != 0).to(device)   # nonzero data of X(3,1)
 nonzero_mask32 = (X[-14556:, 8000:] != 0).to(device)   # nonzero data of X(3,2)
-print(ground_truth[-14556:, 8000:][nonzero_mask32])
-sys.exit()
 mean_values = torch.sum(X[:32469, 8000:], dim=0) / torch.sum(nonzero_mask1222, dim=0)
 imps = mean_values.repeat(14556).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
