@@ -6,7 +6,7 @@ import ot
 import sys
 import anndata
 import scanpy as sc
-# import wandb
+import wandb
 from scipy.stats import pearsonr
 
 # wandb.init(
@@ -21,17 +21,17 @@ from scipy.stats import pearsonr
 epochs = 1000000
 device = 'cuda:0'
 
-multiome = anndata.read_h5ad("/workspace/ImputationOT/data/GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad.gz")
+multiome = anndata.read_h5ad("/workspace/ImputationOT/data/GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad")
 multiome.var_names_make_unique()
 
 ### preprocess
-### step 1
-adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
-adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
-sc.pp.normalize_total(adata_GEX, target_sum=1e4)
-sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
-multiome.X[:, multiome.var['feature_types'] == 'GEX'] = adata_GEX.X
-multiome.X[:, multiome.var['feature_types'] == 'ATAC'] = adata_ATAC.X
+### step 1: normalize (skip)
+# adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
+# adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
+# sc.pp.normalize_total(adata_GEX, target_sum=1e4)
+# sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
+# multiome.X[:, multiome.var['feature_types'] == 'GEX'] = adata_GEX.X
+# multiome.X[:, multiome.var['feature_types'] == 'ATAC'] = adata_ATAC.X
 ### step 2
 sc.pp.log1p(multiome)
 ### step 3
@@ -51,6 +51,8 @@ highly_variable_genes = adata_GEX.var_names
 highly_variable_features = adata_ATAC.var_names
 combined_mask = multiome.var_names.isin(highly_variable_genes) | multiome.var_names.isin(highly_variable_features)
 multiome = multiome[:, combined_mask]
+
+sys.exit()
 
 X = multiome.X.toarray()
 X = torch.tensor(X).to(device)

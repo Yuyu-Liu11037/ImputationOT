@@ -24,7 +24,7 @@ from scipy.stats import pearsonr
 epochs = 30000
 device = 'cuda:0'
 
-citeseq = anndata.read_h5ad("./../data/GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad")
+citeseq = anndata.read_h5ad("/workspace/ImputationOT/data/GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad")
 citeseq.var_names_make_unique()
 
 ### preprocess
@@ -68,52 +68,75 @@ optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
-def perform_kmeans_clustering_and_evaluate(anndata, modality1='GEX', modality2='ADT', n_clusters=45):
-    """
-    Perform K-means clustering on UMAP embeddings of specified modalities of an AnnData object 
-    and evaluate with ARI and NMI.
-    
-    Parameters:
-    anndata (AnnData): AnnData object containing the multiome data.
-    modality1 (str): The first modality to include in clustering (default is 'GEX').
-    modality2 (str): The second modality to include in clustering (default is 'ADT').
-    n_clusters (int): Number of clusters for K-means.
-    
-    Returns:
-    None
-    """
-    anndata = anndata.copy()
-    
-    if f'{modality1}_X_umap' not in anndata.obsm.keys() or f'{modality2}_X_umap' not in anndata.obsm.keys():
-        sc.pp.neighbors(anndata, use_rep='X')
-        sc.tl.umap(anndata)
-        
-    X = np.hstack([anndata.obsm[f'{modality1}_X_umap'], anndata.obsm[f'{modality2}_X_umap']])
-    anndata.obsm['X_umap'] = X
-    print(f"Shape of the combined UMAP matrix: {X.shape}")
-    
-    # Perform K-means clustering
-    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
-    clusters = kmeans.fit_predict(X)
-    anndata.obs['kmeans_clusters'] = clusters
-    
-    # Optionally, print out the first few rows of the obs attribute to check the new column
-    print(anndata.obs.head())
-    
-    ground_truth_labels = anndata.obs['cell_type']
-    predicted_clusters = anndata.obs['kmeans_clusters']
-    
-    ari = adjusted_rand_score(ground_truth_labels, predicted_clusters)
-    nmi = normalized_mutual_info_score(ground_truth_labels, predicted_clusters)
-    
-    print(f"Adjusted Rand Index (ARI): {ari}")
-    print(f"Normalized Mutual Information (NMI): {nmi}")
-    
-    sc.pl.umap(anndata, color='kmeans_clusters', save='_kmeans_clusters_umap.png')
-    plt.savefig('kmeans_clusters_umap.png')
-    print("UMAP plot saved as 'kmeans_clusters_umap.png'")
+def clustering(
+    adata,
+    resolutions,
+    clustering_method,
+    cell_type_col,
+    batch_col,
+):
+    """Clusters the data and calculate agreement with cell type and batch
+    variable.
 
-perform_kmeans_clustering_and_evaluate(citeseq)
+    This method cluster the neighborhood graph (requires having run sc.pp.
+    neighbors first) with "clustering_method" algorithm multiple times with the
+    given resolutions, and return the best result in terms of ARI with cell
+    type.
+    Other metrics such as NMI with cell type, ARi with batch are logged but not
+    returned. (TODO: also return these metrics)
+
+    Args:
+        adata: the dataset to be clustered. adata.obsp shouhld contain the keys
+            'connectivities' and 'distances'.
+        resolutions: a list of leiden/louvain resolution parameters. Will
+            cluster with each resolution in the list and return the best result
+            (in terms of ARI with cell type).
+        clustering_method: Either "leiden" or "louvain".
+        cell_type_col: a key in adata.obs to the cell type column.
+        batch_col: a key in adata.obs to the batch column.
+
+    Returns:
+        best_cluster_key: a key in adata.obs to the best (in terms of ARI with
+            cell type) cluster assignment column.
+        best_ari: the best ARI with cell type.
+        best_nmi: the best NMI with cell type.
+    """
+
+    assert len(resolutions) > 0, f"Must specify at least one resolution."
+
+    if clustering_method == "leiden":
+        clustering_func = sc.tl.leiden
+    elif clustering_method == "louvain":
+        clustering_func = sc.tl.louvain
+    else:
+        raise ValueError(
+            "Please specify louvain or leiden for the clustering method argument."
+        )
+        
+    assert cell_type_col in adata.obs, f"{cell_type_col} not in adata.obs"
+    best_res, best_ari, best_nmi = None, -inf, -inf
+    for res in resolutions:
+        col = f"{clustering_method}_{res}"
+        clustering_func(adata, resolution=res, key_added=col)
+        ari = adjusted_rand_score(adata.obs[cell_type_col], adata.obs[col])
+        nmi = normalized_mutual_info_score(adata.obs[cell_type_col], adata.obs[col])
+        n_unique = adata.obs[col].nunique()
+        if ari > best_ari:
+            best_res = res
+            best_ari = ari
+        if nmi > best_nmi:
+            best_nmi = nmi
+        if batch_col in adata.obs and adata.obs[batch_col].nunique() > 1:
+            ari_batch = adjusted_rand_score(adata.obs[batch_col], adata.obs[col])
+            # print(f'Resolution: {res:5.3g}\tARI: {ari:7.4f}\tNMI: {nmi:7.4f}\tbARI: {ari_batch:7.4f}\t# labels: {n_unique}')
+        else:
+            # print(f'Resolution: {res:5.3g}\tARI: {ari:7.4f}\tNMI: {nmi:7.4f}\t# labels: {n_unique}')
+            a = None
+
+    return f"{clustering_method}_{best_res}", best_ari, best_nmi
+
+scanpy.pp.neighbors(citeseq)
+print(clustering(citeseq, np.arange(0.75, 2, 0.1)))
 sys.exit()
 
 print("start optimizing")
