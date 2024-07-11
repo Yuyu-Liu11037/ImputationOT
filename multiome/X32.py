@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import ot
 import sys
-import anndata
+import anndata as ad
 import scanpy as sc
 import wandb
 import matplotlib.pyplot as plt
@@ -12,6 +12,7 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from scipy.stats import pearsonr
+from tqdm import tqdm
 
 # wandb.init(
 #     project="ot",
@@ -25,41 +26,47 @@ from scipy.stats import pearsonr
 epochs = 30000
 device = 'cuda:0'
 
-multiome = anndata.read_h5ad("/workspace/ImputationOT/data/GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad")
-multiome.var_names_make_unique()
+# multiome = ad.read_h5ad("/workspace/ImputationOT/data/GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad")
+# multiome.var_names_make_unique()
 
 ### preprocess
 #####################################################################################################################################
 ### step 1: normalize
-adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
-adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
-sc.pp.normalize_total(adata_GEX, target_sum=1e4)
-### error: matrix too large, exceeding float32
-sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
-citeseq.X[:, multiome.var['feature_types'] == 'GEX'] = adata_GEX.X
-citeseq.X[:, multiome.var['feature_types'] == 'ATAC'] = adata_ATAC.X
+# adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
+# adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
+# sc.pp.normalize_total(adata_GEX, target_sum=1e4)
+# sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
+# multiome.X[:, multiome.var['feature_types'] == 'GEX'] = adata_GEX.X
+# atac_indices = np.where(multiome.var['feature_types'] == 'ATAC')[0]
+# chunk_size = 1000  # Adjust the chunk size as needed
+# for start in tqdm(range(0, len(atac_indices), chunk_size)):
+#     end = start + chunk_size
+#     chunk_indices = atac_indices[start:end]
+#     multiome.X[:, chunk_indices] = adata_ATAC.X[:, start:end]
 ### step 2: log transform
-sc.pp.log1p(multiome)
+# sc.pp.log1p(multiome)
+# multiome.write('log1p_multiome.h5ad')
+multiome = ad.read_h5ad("/workspace/ImputationOT/multiome/log1p_multiome.h5ad")
 ### step 3
 adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
 sc.pp.highly_variable_genes(
     adata_GEX,
-    n_top_genes=2000,
-    subset=True
+    n_top_genes=2000
 )
 adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
 sc.pp.highly_variable_genes(
     adata_ATAC,
-    n_top_genes=8000,
-    subset=True
+    n_top_genes=8000
 )
 ### TODO: debug, adata_ATAC contains 8006 peaks
-adata_ATAC = adata_ATAC[:, :8000]
-highly_variable_peaks_mask = adata_ATAC.var['highly_variable']
-highly_variable_genes_mask = adata_GEX.var['highly_variable']
-multiome = multiome[:, highly_variable_peaks_mask | highly_variable_genes_mask]
-print(multiome)
-sys.exit()
+# adata_ATAC = adata_ATAC[:, :8000]
+highly_variable_peaks_mask = adata_ATAC.var['highly_variable'].values
+highly_variable_genes_mask = adata_GEX.var['highly_variable'].values
+original_var = multiome.var
+highly_variable_mask = np.zeros(original_var.shape[0], dtype=bool)
+highly_variable_mask[multiome.var['feature_types'] == 'ATAC'] = highly_variable_peaks_mask
+highly_variable_mask[multiome.var['feature_types'] == 'GEX'] = highly_variable_genes_mask
+multiome = multiome[:, highly_variable_mask]
 #####################################################################################################################################
 
 X = multiome.X.toarray()
