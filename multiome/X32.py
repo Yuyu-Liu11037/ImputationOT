@@ -25,78 +25,40 @@ from tqdm import tqdm
 
 epochs = 30000
 device = 'cuda:0'
+threshold = .5
 
-# multiome = ad.read_h5ad("/workspace/ImputationOT/data/GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad")
-# multiome.var_names_make_unique()
-# print(multiome.X[:10,-10:].todense())
-# print(multiome.X[:10,:10].todense())
-# print(multiome.X[-10:,:10].todense())
-# print(multiome.X[-10:,-10:].todense())
-# sys.exit()
-# print("full data")
-# print("Matrix Shape:", X.shape)
-# print("Density:", X.nnz / (X.shape[0] * X.shape[1]))
-# print("Minimum Value:", X.min())
-# print("Maximum Value:", X.max())
-# print("Mean Value without zeros:", X[X != 0].mean())
-# print()
+multiome = ad.read_h5ad("/workspace/ImputationOT/data/GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad")
+multiome.var_names_make_unique()
 
-# X = multiome.X
-# X = X[:, :116490]
-# print("ATAC data")
-# print("Matrix Shape:", X.shape)
-# print("Density:", X.nnz / (X.shape[0] * X.shape[1]))
-# print("Minimum Value:", X.min())
-# print("Maximum Value:", X.max())
-# print("Mean Value without zeros:", X[X != 0].mean())
-# print()
-
-# X = multiome.X
-# X = X[:, 116490:]
-# print("GEX data")
-# print("Matrix Shape:", X.shape)
-# print("Density:", X.nnz / (X.shape[0] * X.shape[1]))
-# print("Minimum Value:", X.min())
-# print("Maximum Value:", X.max())
-# print("Mean Value without zeros:", X[X != 0].mean())
-# sys.exit()
-
-### preprocess
 #####################################################################################################################################
+### preprocess
 ### step 1: normalize
-# adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
-# adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
-# sc.pp.normalize_total(adata_GEX, target_sum=1e4)
-# sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
-# multiome.X[:, multiome.var['feature_types'] == 'GEX'] = adata_GEX.X
-# atac_indices = np.where(multiome.var['feature_types'] == 'ATAC')[0]
-# chunk_size = 10000  # Adjust the chunk size as needed
-# for start in tqdm(range(0, len(atac_indices), chunk_size)):
-#     end = start + chunk_size
-#     chunk_indices = atac_indices[start:end]
-#     multiome.X[:, chunk_indices] = adata_ATAC.X[:, start:end]
-# ## step 2: log transform
-# sc.pp.log1p(multiome)
-# multiome.write('log1p_multiome.h5ad')
-# sys.exit()
-multiome = ad.read_h5ad("/workspace/ImputationOT/multiome/log1p_multiome.h5ad")
-### step 3
 adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
-sc.pp.highly_variable_genes(
-    adata_GEX
-)
 adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
+sc.pp.normalize_total(adata_GEX, target_sum=1e4)
+# sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
+### step 2: log transform
+sc.pp.log1p(adata_GEX)
+# sc.pp.log1p(adata_ATAC)
+### step 3
+sc.pp.highly_variable_genes(
+    adata_GEX,
+    subset=True
+)
 sc.pp.highly_variable_genes(
     adata_ATAC,
-    n_top_genes=4000
+    n_top_genes=4000,
+    subset=True
 )
-highly_variable_peaks_mask = adata_ATAC.var['highly_variable'].values
-highly_variable_genes_mask = adata_GEX.var['highly_variable'].values
-highly_variable_mask = np.zeros(multiome.var.shape[0], dtype=bool)
-highly_variable_mask[multiome.var['feature_types'] == 'ATAC'] = highly_variable_peaks_mask
-highly_variable_mask[multiome.var['feature_types'] == 'GEX'] = highly_variable_genes_mask
-multiome = multiome[:, highly_variable_mask]   # View of AnnData object with n_obs × n_vars = 69249 × 6832
+print('Finished preprocessing.')
 #####################################################################################################################################
+
+multiome = ad.concat([adata_ATAC, adata_GEX])   # changed the original data: left 4000: ATAC, right 13431: GEX
+print(multiome)
+sys.exit()
+print(multiome.X[:, 3999])
+print(multiome.X[:, 4000])
+sys.exit()
 X = multiome.X.toarray()
 X = torch.tensor(X).to(device)
 X = X[:47025]   # Matrix is too large. Remove certain rows to save memory.
@@ -117,7 +79,7 @@ optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
-print("start optimizing")
+print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
