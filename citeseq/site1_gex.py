@@ -19,11 +19,11 @@ from tqdm import tqdm
 
 #     config={
 #     "dataset": "NIPS2021-Cite-seq",
-#     "epochs": 30000,
+#     "epochs": 10000,
 #     }
 # )
 
-epochs = 30000
+epochs = 10000
 device = "cuda:0"
 
 citeseq = ad.read_h5ad("/workspace/ImputationOT/data/citeseq_processed.h5ad")
@@ -72,7 +72,7 @@ ari, nmi = clustering(citeseq)
 print(f"ari: {ari:.4f}, nmi: {nmi:.4f}\n")
 
 X = citeseq.X.toarray()
-X34 = X[41482:]
+X34 = X[41482:].copy()
 X = torch.tensor(X).to(device)
 X = X[:41482]    # data in site1, site2
 ground_truth = X.clone()
@@ -98,6 +98,7 @@ print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
+    
     if epoch == 0:
         rmse_val = rmse(X_imputed[:16311, :2000][nonzero_mask].detach().cpu().numpy(), ground_truth[:16311, :2000][nonzero_mask].detach().cpu().numpy())
         pearson_corr = pearsonr(X_imputed[:16311, :2000][nonzero_mask].detach().cpu().numpy(), ground_truth[:16311, :2000][nonzero_mask].detach().cpu().numpy())[0]

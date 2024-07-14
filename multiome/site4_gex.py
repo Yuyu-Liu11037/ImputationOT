@@ -8,6 +8,9 @@ import anndata as ad
 import scanpy as sc
 import wandb
 import sklearn
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from scipy.stats import pearsonr
 
 # wandb.init(
@@ -42,33 +45,37 @@ sc.pp.highly_variable_genes(
     n_top_genes=4000,
     subset=True
 )
-print('Finished preprocessing')
-print()
-X = adata_ATAC.X
-print("ATAC data after filtering")
-print("Matrix Shape:", X.shape)
-print("Density:", X.nnz / (X.shape[0] * X.shape[1]))
-print("Minimum Value:", X.min())
-print("Maximum Value:", X.max())
-print("Mean Value without zeros:", X[X != 0].mean())
-print()
-
-X = adata_GEX.X
-print("GEX data after filtering")
-print("Matrix Shape:", X.shape)
-print("Density:", X.nnz / (X.shape[0] * X.shape[1]))
-print("Minimum Value:", X.min())
-print("Maximum Value:", X.max())
-print("Mean Value without zeros:", X[X != 0].mean())
-print()
 
 num_atac = adata_ATAC.X.shape[1]
-multiome = ad.concat([adata_ATAC, adata_GEX], axis=1)   # changed the original data: left num_atac: ATAC, right 2832: GEX
-print(multiome.X.shape)
-print()
+multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="first")   # changed the original data: left num_atac: ATAC, right 2832: GEX
+
+print(f"Finished preprocessing\n")
 #####################################################################################################################################
 
+def clustering(adata):
+    sc.pp.pca(adata, n_comps=50)
+    sc.pp.neighbors(adata, n_neighbors=15, use_rep="X_pca")
+    resolution_values = [0.1, 0.5, 0.75, 1.0]
+    true_labels = adata.obs["cell_type"]
+    best_ari, best_nmi = 0, 0
+
+    for resolution in resolution_values:
+        sc.tl.leiden(adata, resolution=resolution, flavor="igraph", n_iterations=2)
+        predicted_labels = adata.obs["leiden"]
+    
+        ari = adjusted_rand_score(true_labels, predicted_labels)
+        nmi = normalized_mutual_info_score(true_labels, predicted_labels)
+        best_ari = max(best_ari, ari)
+        best_nmi = max(best_nmi, nmi)
+    
+    return best_ari, best_nmi
+
+print("Ground truth clustering")
+ari, nmi = clustering(multiome)
+print(f"ari: {ari:.4f}, nmi: {nmi:.4f}\n")
+
 X = multiome.X.toarray()
+X3 = X[32469:47025].copy()
 X = torch.tensor(X).to(device)
 X = torch.cat((X[:32469], X[-22224:]), dim=0)   # Matrix is too large. Remove certain rows to save memory.
 ground_truth = X.clone()
@@ -100,21 +107,23 @@ for epoch in range(epochs):
         print(f"Initial pearson: {pearson_corr:.4f}, rmse: {rmse_val:.4f}")
 
     X12 = X_imputed[:32469, :]
-    X3  = X_imputed[-22224:, :]
+    X4  = X_imputed[-22224:, :]
     ATAC = torch.transpose(X_imputed[:, :num_atac], 0, 1)
     GEX  = torch.transpose(X_imputed[:, num_atac:], 0, 1)
-    loss = 0.5 * ot.sliced_wasserstein_distance(X12, X3) + 0.5 * ot.sliced_wasserstein_distance(GEX, ATAC)
+    loss = 0.5 * ot.sliced_wasserstein_distance(X12, X4) + 0.5 * ot.sliced_wasserstein_distance(GEX, ATAC)
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     scheduler.step()
 
-    if (epoch + 1) % 200 == 0:
+    if (epoch + 1) % 250 == 0:
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
         
         pearson_corr = pearsonr(X_imputed[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy())[0]
         rmse_val = rmse(X_imputed[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy())
-        # wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr})
-        print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, rmse: {rmse_val:.4f}")
+        multiome.X = np.vstack((X_imputed[:32469].detach().cpu().numpy(), X3, X_imputed[-22224:].detach().cpu().numpy()))
+        ari, nmi = clustering(multiome)
+        print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, rmse:{rmse_val:.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
+        # wandb.log({"Iteration": epoch + 1, "loss": loss, "rmse": rmse_val, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
