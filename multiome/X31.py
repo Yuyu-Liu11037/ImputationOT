@@ -19,7 +19,7 @@ from scipy.stats import pearsonr
 #     }
 # )
 
-epochs = 10000
+epochs = 30000
 device = 'cuda:0'
 threshold = .5
 
@@ -87,7 +87,7 @@ imps.requires_grad = True
 optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
-mse = sklearn.metrics.root_mean_squared_error
+rmse = sklearn.metrics.root_mean_squared_error
 
 print("start optimizing")
 for epoch in range(epochs):
@@ -95,7 +95,7 @@ for epoch in range(epochs):
     X_imputed[mask] = imps
 
     if epoch == 0:
-        rmse_val = mse(X_imputed[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy(), ground_truth[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy())
+        rmse_val = rmse(X_imputed[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy(), ground_truth[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy())
         print(f"Initial pearson: nan, rmse: {rmse_val:.4f}")
 
     X12 = X_imputed[:47025, :]
@@ -113,6 +113,6 @@ for epoch in range(epochs):
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
 
-        rmse_val = mse(X_imputed[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy(), ground_truth[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy())
+        rmse_val = rmse(X_imputed[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy(), ground_truth[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy())
         # wandb.log({"Iteration": epoch + 1, "loss": loss, "rmse": rmse_val})
         print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: nan, rmse: {rmse_val:.4f}")
