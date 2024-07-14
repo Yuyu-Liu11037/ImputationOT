@@ -62,12 +62,13 @@ print("Minimum Value:", X.min())
 print("Maximum Value:", X.max())
 print("Mean Value without zeros:", X[X != 0].mean())
 print()
-#####################################################################################################################################
 
 num_atac = adata_ATAC.X.shape[1]
 multiome = ad.concat([adata_ATAC, adata_GEX], axis=1)   # changed the original data: left num_atac: ATAC, right 2832: GEX
 print(multiome.X.shape)
 print()
+#####################################################################################################################################
+
 X = multiome.X.toarray()
 X = torch.tensor(X).to(device)
 X = X[:47025]   # Matrix is too large. Remove certain rows to save memory.
