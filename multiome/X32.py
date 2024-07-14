@@ -7,6 +7,7 @@ import sys
 import anndata as ad
 import scanpy as sc
 import wandb
+import sklearn
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.cluster import KMeans
@@ -26,7 +27,7 @@ from tqdm import tqdm
 epochs = 30000
 device = 'cuda:0'
 
-multiome = ad.read_h5ad("/workspace/ImputationOT/data/GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad")
+multiome = ad.read_h5ad("/workspace/ImputationOT/data/multiome_processed.h5ad")
 multiome.var_names_make_unique()
 
 #####################################################################################################################################
@@ -35,8 +36,10 @@ multiome.var_names_make_unique()
 adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
 adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
 sc.pp.normalize_total(adata_GEX, target_sum=1e4)
+sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
 ### step 2: log transform
 sc.pp.log1p(adata_GEX)
+sc.pp.log1p(adata_ATAC)
 ### step 3
 sc.pp.highly_variable_genes(
     adata_GEX,
@@ -47,7 +50,7 @@ sc.pp.highly_variable_genes(
     n_top_genes=4000,
     subset=True
 )
-print('Finished preprocessing.')
+print('Finished preprocessing')
 #####################################################################################################################################
 
 multiome = ad.concat([adata_ATAC, adata_GEX], axis=1)   # changed the original data: left 4000: ATAC, right 2832: GEX
@@ -70,6 +73,7 @@ imps.requires_grad = True
 optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
+mse = sklearn.metrics.mean_squared_error
 
 print("Start optimizing")
 for epoch in range(epochs):
@@ -78,7 +82,8 @@ for epoch in range(epochs):
 
     if epoch == 0:
         pearson_corr = pearsonr(X_imputed[-14556:, 4000:][nonzero_mask32].detach().cpu().numpy(), ground_truth[-14556:, 4000:][nonzero_mask32].detach().cpu().numpy())[0]
-        print(f"pearson: {pearson_corr:.4f}")
+        rmse_val = np.sqrt(mse(X_imputed[-14556:, 4000:][nonzero_mask32].detach().cpu().numpy(), ground_truth[-14556:, 4000:][nonzero_mask32].detach().cpu().numpy()))
+        print(f"pearson: {pearson_corr:.4f}, rmse: {rmse_val:.4f}")
 
     X12 = X_imputed[:32469, :]
     X3  = X_imputed[-14556:, :]
@@ -96,5 +101,6 @@ for epoch in range(epochs):
         X_imputed[mask] = imps
         
         pearson_corr = pearsonr(X_imputed[-14556:, 4000:][nonzero_mask32].detach().cpu().numpy(), ground_truth[-14556:, 4000:][nonzero_mask32].detach().cpu().numpy())[0]
+        rmse_val = np.sqrt(mse(X_imputed[-14556:, 4000:][nonzero_mask32].detach().cpu().numpy(), ground_truth[-14556:, 4000:][nonzero_mask32].detach().cpu().numpy()))
         # wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr})
-        print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}")
+        print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, rmse: {rmse_val:.4f}")
