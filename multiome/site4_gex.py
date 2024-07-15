@@ -29,12 +29,14 @@ multiome = ad.read_h5ad("/workspace/ImputationOT/data/multiome_processed.h5ad")
 multiome.var_names_make_unique()
 
 #####################################################################################################################################
+print("Start preprocessing")
 ### preprocess
 adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
 adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
 ### step 1: normalize
-# sc.pp.normalize_total(adata_GEX, target_sum=1e4)
-# sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
+print("Use normalization")
+sc.pp.normalize_total(adata_GEX, target_sum=1e4)
+sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
 ### step 2: log transform
 sc.pp.log1p(adata_GEX)
 sc.pp.log1p(adata_ATAC)
@@ -47,7 +49,7 @@ sc.pp.highly_variable_genes(
 )
 
 num_atac = adata_ATAC.X.shape[1]
-multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="first")   # changed the original data: left num_atac: ATAC, right 2832: GEX
+multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="first")   # left num_atac: ATAC, right 2832: GEX
 
 print(f"Finished preprocessing\n")
 #####################################################################################################################################
@@ -55,7 +57,7 @@ print(f"Finished preprocessing\n")
 def clustering(adata):
     sc.pp.pca(adata, n_comps=50)
     sc.pp.neighbors(adata, n_neighbors=15, use_rep="X_pca")
-    resolution_values = [0.1, 0.5, 0.75, 1.0]
+    resolution_values = [0.1, 0.5, 0.75]
     true_labels = adata.obs["cell_type"]
     best_ari, best_nmi = 0, 0
 

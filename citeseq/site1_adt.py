@@ -21,7 +21,7 @@ wandb.init(
 epochs = 100000
 device = 'cuda:0'
 
-citeseq = anndata.read_h5ad("./../data/GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad")
+citeseq = anndata.read_h5ad("/workspace/ImputationOT/data/citeseq_processed.h5ad")
 citeseq.var_names_make_unique()
 
 ### preprocess
