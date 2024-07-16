@@ -13,17 +13,18 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from scipy.stats import pearsonr
 
-# wandb.init(
-#     project="ot",
-
-#     config={
-#     "dataset": "NIPS2021-Multiome",
-#     "epochs": 30000,
-#     }
-# )
-
 epochs = 10000
 device = 'cuda:0'
+
+wandb.init(
+    project="ot",
+
+    config={
+    "dataset": "NIPS2021-Multiome",
+    "epochs": epochs,
+    "use_normalization": True
+    }
+)
 
 multiome = ad.read_h5ad("/workspace/ImputationOT/data/multiome_processed.h5ad")
 multiome.var_names_make_unique()
@@ -72,9 +73,9 @@ def clustering(adata):
     
     return best_ari, best_nmi
 
-print("Ground truth clustering")
-ari, nmi = clustering(multiome)
-print(f"ari: {ari:.4f}, nmi: {nmi:.4f}\n")
+# print("Ground truth clustering")
+# ari, nmi = clustering(multiome)
+# print(f"ari: {ari:.4f}, nmi: {nmi:.4f}\n")
 
 X = multiome.X.toarray()
 X3 = X[32469:47025].copy()
@@ -128,4 +129,4 @@ for epoch in range(epochs):
         multiome.X = np.vstack((X_imputed[:32469].detach().cpu().numpy(), X3, X_imputed[-22224:].detach().cpu().numpy()))
         ari, nmi = clustering(multiome)
         print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, rmse:{rmse_val:.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
-        # wandb.log({"Iteration": epoch + 1, "loss": loss, "rmse": rmse_val, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+        wandb.log({"Iteration": epoch + 1, "loss": loss, "rmse": rmse_val, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
