@@ -44,6 +44,16 @@ sc.pp.highly_variable_genes(
     subset=True
 )
 citeseq = ad.concat([adata_GEX, adata_ADT], axis=1, merge="first")   # X(:,1): GEX, X(:,2): ADT
+
+X = citeseq.X
+X = X[:, 2000:]
+print("ADT data")
+print("Matrix Shape:", X.shape)
+print("Density:", X.nnz / (X.shape[0] * X.shape[1]))
+print("Minimum Value:", X.min())
+print("Maximum Value:", X.max())
+sys.exit()
+
 print(f"Finished preprocessing\n")
 #####################################################################################################################################
 
