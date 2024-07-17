@@ -8,22 +8,21 @@ import anndata as ad
 import scanpy as sc
 import wandb
 import sklearn
-import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from scipy.stats import pearsonr
 
-epochs = 10000
+epochs = 100000
 device = 'cuda:0'
 
 wandb.init(
     project="ot",
 
     config={
-    "dataset": "NIPS2021-Multiome",
-    "missing data": "site3 atac",
-    "epochs": epochs,
-    "use_normalization": True
+        "dataset": "NIPS2021-Multiome",
+        "missing data": "site3 atac",
+        "epochs": epochs,
+        "use_normalization": True,
+        "target_sum": 1e4
     }
 )
 
@@ -102,7 +101,15 @@ for epoch in range(epochs):
 
     if epoch == 0:
         pearson_corr = pearsonr(X_imputed[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy(), ground_truth[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy())[0]
-        print(f"Initial pearson: {pearson_corr:.4f}")
+        multiome.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
+        ari, nmi = clustering(multiome)
+        print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
+        wandb.log({"Iteration": 0, 
+                   "loss": 0, 
+                   "pearson": pearson_corr, 
+                   "ari": ari, 
+                   "nmi": nmi}
+                 )
 
     X12 = X_imputed[:47025, :]
     X3  = X_imputed[-14556:, :]
@@ -115,7 +122,7 @@ for epoch in range(epochs):
     optimizer.step()
     scheduler.step()
 
-    if (epoch + 1) % 200 == 0:
+    if (epoch + 1) % 300 == 0:
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
 

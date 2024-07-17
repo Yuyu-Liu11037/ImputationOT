@@ -20,6 +20,7 @@ wandb.init(
     config={
     "dataset": "NIPS2021-Cite-seq",
     "epochs": epochs,
+    "missing data": "site4 adt"
     }
 )
 
@@ -31,8 +32,8 @@ citeseq.var_names_make_unique()
 adata_GEX = citeseq[:, citeseq.var["feature_types"] == "GEX"].copy()
 adata_ADT = citeseq[:, citeseq.var["feature_types"] == "ADT"].copy()
 ### step 1
-sc.pp.normalize_total(adata_GEX, target_sum=1e6)
-sc.pp.normalize_total(adata_ADT, target_sum=1e6)
+sc.pp.normalize_total(adata_GEX, target_sum=1e4)
+sc.pp.normalize_total(adata_ADT, target_sum=1e4)
 ### step 2
 sc.pp.log1p(adata_GEX)
 sc.pp.log1p(adata_ADT)
@@ -47,8 +48,8 @@ print(f"Finished preprocessing\n")
 #####################################################################################################################################
 
 def clustering(adata):
-    sc.pp.pca(adata, n_comps=50)
-    sc.pp.neighbors(adata, n_neighbors=15, use_rep="X_pca")
+    sc.pp.pca(adata)
+    sc.pp.neighbors(adata, use_rep="X_pca")
     resolution_values = [0.1, 0.5, 0.75, 1.0]
     true_labels = adata.obs["cell_type"]
     best_ari, best_nmi = 0, 0
@@ -85,7 +86,7 @@ optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
-print("start optimizing")
+print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps

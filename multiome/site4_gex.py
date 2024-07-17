@@ -8,12 +8,10 @@ import anndata as ad
 import scanpy as sc
 import wandb
 import sklearn
-import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from scipy.stats import pearsonr
 
-epochs = 10000
+epochs = 100000
 device = 'cuda:0'
 
 wandb.init(
@@ -36,8 +34,8 @@ adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
 adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
 ### step 1: normalize
 print("Use normalization")
-sc.pp.normalize_total(adata_GEX, target_sum=1e4)
-sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
+sc.pp.normalize_total(adata_GEX)
+sc.pp.normalize_total(adata_ATAC)
 ### step 2: log transform
 sc.pp.log1p(adata_GEX)
 sc.pp.log1p(adata_ATAC)
@@ -56,9 +54,9 @@ print(f"Finished preprocessing\n")
 #####################################################################################################################################
 
 def clustering(adata):
-    sc.pp.pca(adata, n_comps=50)
-    sc.pp.neighbors(adata, n_neighbors=15, use_rep="X_pca")
-    resolution_values = [0.1, 0.5, 0.75]
+    sc.pp.pca(adata)
+    sc.pp.neighbors(adata, use_rep="X_pca")
+    resolution_values = [0.1, 0.5, 0.75, 1.0]
     true_labels = adata.obs["cell_type"]
     best_ari, best_nmi = 0, 0
 
@@ -97,7 +95,6 @@ imps.requires_grad = True
 optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
-rmse = sklearn.metrics.root_mean_squared_error
 
 print("Start optimizing")
 for epoch in range(epochs):
@@ -106,8 +103,10 @@ for epoch in range(epochs):
 
     if epoch == 0:
         pearson_corr = pearsonr(X_imputed[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy())[0]
-        rmse_val = rmse(X_imputed[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy())
-        print(f"Initial pearson: {pearson_corr:.4f}, rmse: {rmse_val:.4f}")
+        multiome.X = np.vstack((X_imputed[:32469].detach().cpu().numpy(), X3, X_imputed[-22224:].detach().cpu().numpy()))
+        ari, nmi = clustering(multiome)
+        print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
+        wandb.log({"Iteration": 0, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
     X12 = X_imputed[:32469, :]
     X4  = X_imputed[-22224:, :]
@@ -120,13 +119,12 @@ for epoch in range(epochs):
     optimizer.step()
     scheduler.step()
 
-    if (epoch + 1) % 250 == 0:
+    if (epoch + 1) % 300 == 0:
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
         
         pearson_corr = pearsonr(X_imputed[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy())[0]
-        rmse_val = rmse(X_imputed[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy())
         multiome.X = np.vstack((X_imputed[:32469].detach().cpu().numpy(), X3, X_imputed[-22224:].detach().cpu().numpy()))
         ari, nmi = clustering(multiome)
-        print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, rmse:{rmse_val:.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
-        wandb.log({"Iteration": epoch + 1, "loss": loss, "rmse": rmse_val, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+        print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
+        wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
