@@ -8,8 +8,10 @@ import anndata as ad
 import scanpy as sc
 import wandb
 import sklearn
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from scipy.stats import pearsonr
+
+
+from ..utils import clustering
 
 epochs = 100000
 device = 'cuda:0'
@@ -52,24 +54,6 @@ citeseq = ad.concat([adata_GEX, adata_ADT], axis=1, merge="first")   # X(:,1): G
 print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
-def clustering(adata):
-    sc.pp.pca(adata)
-    sc.pp.neighbors(adata, use_rep="X_pca")
-    resolution_values = [0.1, 0.5, 0.75, 1.0]
-    true_labels = adata.obs["cell_type"]
-    best_ari, best_nmi = 0, 0
-
-    for resolution in resolution_values:
-        sc.tl.leiden(adata, resolution=resolution, flavor="igraph", n_iterations=2)
-        predicted_labels = adata.obs["leiden"]
-    
-        ari = adjusted_rand_score(true_labels, predicted_labels)
-        nmi = normalized_mutual_info_score(true_labels, predicted_labels)
-        best_ari = max(best_ari, ari)
-        best_nmi = max(best_nmi, nmi)
-    
-    return best_ari, best_nmi
-
 X = citeseq.X.toarray()
 X4 = X[SITE1_CELL + SITE2_CELL + SITE3_CELL:].copy()
 X = torch.tensor(X).to(device)
@@ -87,7 +71,7 @@ imps = mean_values.repeat(SITE3_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-optimizer = optim.Adam([imps], lr=0.1)
+optimizer = optim.RMSprop([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
