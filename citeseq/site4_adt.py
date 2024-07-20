@@ -31,21 +31,24 @@ citeseq.var_names_make_unique()
 
 #####################################################################################################################################
 ### preprocess
-adata_GEX = citeseq[:, citeseq.var["feature_types"] == "GEX"].copy()
-adata_ADT = citeseq[:, citeseq.var["feature_types"] == "ADT"].copy()
 ### step 1
+adata_GEX = citeseq[:, citeseq.var['feature_types'] == 'GEX'].copy()
+adata_ADT = citeseq[:, citeseq.var['feature_types'] == 'ADT'].copy()
 sc.pp.normalize_total(adata_GEX, target_sum=1e4)
 sc.pp.normalize_total(adata_ADT, target_sum=1e4)
+citeseq.X[:, citeseq.var['feature_types'] == 'GEX'] = adata_GEX.X
+citeseq.X[:, citeseq.var['feature_types'] == 'ADT'] = adata_ADT.X
 ### step 2
-sc.pp.log1p(adata_GEX)
-sc.pp.log1p(adata_ADT)
+sc.pp.log1p(citeseq)
 ### step 3
+adata_GEX = citeseq[:, citeseq.var['feature_types'] == 'GEX'].copy()
 sc.pp.highly_variable_genes(
     adata_GEX,
     n_top_genes=2000,
     subset=True
 )
-citeseq = ad.concat([adata_GEX, adata_ADT], axis=1, merge="same")   # X(:,1): GEX, X(:,2): ADT
+highly_variable_genes_mask = adata_GEX.var['highly_variable']
+citeseq = citeseq[:, (citeseq.var['feature_types'] == 'ADT') | highly_variable_genes_mask]
 print(f"Finished preprocessing\n")
 #####################################################################################################################################
 
