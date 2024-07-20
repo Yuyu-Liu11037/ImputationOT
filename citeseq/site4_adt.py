@@ -49,7 +49,7 @@ sc.pp.highly_variable_genes(
 )
 highly_variable_genes_mask = adata_GEX.var['highly_variable']
 citeseq = citeseq[:, (citeseq.var['feature_types'] == 'ADT') | highly_variable_genes_mask]
-print(f"Finished preprocessing\n")
+print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
 X = citeseq.X.toarray()
