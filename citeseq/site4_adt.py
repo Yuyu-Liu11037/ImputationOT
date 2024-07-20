@@ -11,7 +11,7 @@ import sklearn
 from scipy.stats import pearsonr
 
 
-from ..utils import clustering
+from utils import tools
 
 epochs = 100000
 device = 'cuda:0'
@@ -45,17 +45,7 @@ sc.pp.highly_variable_genes(
     n_top_genes=2000,
     subset=True
 )
-citeseq = ad.concat([adata_GEX, adata_ADT], axis=1, merge="first")   # X(:,1): GEX, X(:,2): ADT
-
-X = citeseq.X
-X = X[:, 2000:]
-print("ADT data")
-print("Matrix Shape:", X.shape)
-print("Density:", X.nnz / (X.shape[0] * X.shape[1]))
-print("Minimum Value:", X.min())
-print("Maximum Value:", X.max())
-sys.exit()
-
+citeseq = ad.concat([adata_GEX, adata_ADT], axis=1, merge="same")   # X(:,1): GEX, X(:,2): ADT
 print(f"Finished preprocessing\n")
 #####################################################################################################################################
 
@@ -88,7 +78,7 @@ for epoch in range(epochs):
     if epoch == 0:
         pearson_corr = pearsonr(X_imputed[-16750:, 2000:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-16750:, 2000:][nonzero_mask42].detach().cpu().numpy())[0]
         citeseq.X = np.vstack((X_imputed[:41482].detach().cpu().numpy(), X3, X_imputed[41482:].detach().cpu().numpy()))
-        ari, nmi = clustering(citeseq)
+        ari, nmi = tools.clustering(citeseq)
         print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
@@ -109,7 +99,7 @@ for epoch in range(epochs):
     if (epoch + 1) % 300 == 0:
         pearson_corr = pearsonr(X_imputed[-16750:, 2000:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-16750:, 2000:][nonzero_mask42].detach().cpu().numpy())[0]
         citeseq.X = np.vstack((X_imputed[:41482].detach().cpu().numpy(), X3, X_imputed[41482:].detach().cpu().numpy()))
-        ari, nmi = clustering(citeseq)
+        ari, nmi = tools.clustering(citeseq)
         print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
             

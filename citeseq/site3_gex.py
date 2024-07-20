@@ -11,7 +11,7 @@ import sklearn
 from scipy.stats import pearsonr
 
 
-from ..utils import clustering
+from utils import tools
 
 epochs = 100000
 device = 'cuda:0'
@@ -39,8 +39,8 @@ citeseq.var_names_make_unique()
 adata_GEX = citeseq[:, citeseq.var["feature_types"] == "GEX"].copy()
 adata_ADT = citeseq[:, citeseq.var["feature_types"] == "ADT"].copy()
 ### step 1
-sc.pp.normalize_total(adata_GEX)
-sc.pp.normalize_total(adata_ADT)
+sc.pp.normalize_total(adata_GEX, target_sum=1e4)
+sc.pp.normalize_total(adata_ADT, target_sum=1e4)
 ### step 2
 sc.pp.log1p(adata_GEX)
 sc.pp.log1p(adata_ADT)
@@ -50,7 +50,7 @@ sc.pp.highly_variable_genes(
     n_top_genes=FILLED_GEX,
     subset=True
 )
-citeseq = ad.concat([adata_GEX, adata_ADT], axis=1, merge="first")   # X(:,1): GEX, X(:,2): ADT
+citeseq = ad.concat([adata_GEX, adata_ADT], axis=1, merge="same")   # X(:,1): GEX, X(:,2): ADT
 print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
@@ -71,7 +71,7 @@ imps = mean_values.repeat(SITE3_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-optimizer = optim.RMSprop([imps], lr=0.1)
+optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
@@ -83,7 +83,7 @@ for epoch in range(epochs):
     if epoch == 0:
         pearson_corr = pearsonr(X_imputed[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy(), ground_truth[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy())[0]
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
-        ari, nmi = clustering(citeseq)
+        ari, nmi = tools.clustering(citeseq)
         print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
@@ -104,6 +104,6 @@ for epoch in range(epochs):
         
         pearson_corr = pearsonr(X_imputed[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy(), ground_truth[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy())[0]
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
-        ari, nmi = clustering(citeseq)
+        ari, nmi = tools.clustering(citeseq)
         print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})

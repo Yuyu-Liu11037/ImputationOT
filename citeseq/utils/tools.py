@@ -5,7 +5,7 @@ from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 def clustering(adata):
     sc.pp.pca(adata)
     sc.pp.neighbors(adata, use_rep="X_pca")
-    resolution_values = [0.1, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    resolution_values = [0.15, 0.2, 0.25]  # corresponding to approximately 9 categories
     true_labels = adata.obs["cell_type"]
     best_ari, best_nmi = 0, 0
 
@@ -15,7 +15,6 @@ def clustering(adata):
     
         ari = adjusted_rand_score(true_labels, predicted_labels)
         nmi = normalized_mutual_info_score(true_labels, predicted_labels)
-        print(f"Resolution {resolution}: ari = {ari}, nmi = {nmi}")
         best_ari = max(best_ari, ari)
         best_nmi = max(best_nmi, nmi)
     
