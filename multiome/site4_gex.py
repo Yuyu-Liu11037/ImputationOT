@@ -48,14 +48,13 @@ sc.pp.highly_variable_genes(
 )
 
 num_atac = adata_ATAC.X.shape[1]
-multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="same")   # left num_atac: ATAC, right 2832: GEX
+multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="first")   # left num_atac: ATAC, right 2832: GEX
 print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
 def clustering(adata):
-    sc.pp.pca(adata)
-    sc.pp.neighbors(adata, use_rep="X_pca")
-    resolution_values = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]  # corresponding to approximately 22 categories
+    sc.pp.neighbors(adata, use_rep='X')
+    resolution_values = [0.3, 0.5, 0.7, 0.9, 1.0, 1.1, 1.2]  # corresponding to approximately 22 categories
     true_labels = adata.obs["cell_type"]
     best_ari, best_nmi = 0, 0
 
