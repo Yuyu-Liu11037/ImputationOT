@@ -6,8 +6,10 @@ import ot
 import sys
 import anndata as ad
 import scanpy as sc
+import pandas as pd
 import wandb
 import sklearn
+import scipy.sparse
 from scipy.stats import pearsonr
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
@@ -26,6 +28,7 @@ wandb.init(
 
 multiome = ad.read_h5ad("/workspace/ImputationOT/data/multiome_processed.h5ad")   # 22 cell types
 multiome.var_names_make_unique()
+multiome_copy = multiome.copy()
 
 #####################################################################################################################################
 print("Start preprocessing")
@@ -48,12 +51,20 @@ sc.pp.highly_variable_genes(
 )
 
 num_atac = adata_ATAC.X.shape[1]
-multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="first")   # left num_atac: ATAC, right 2832: GEX
+# multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="first")   # left num_atac: ATAC, right 2832: GEX
+combined_var_names = adata_GEX.var_names.append(adata_ATAC.var_names)
+multiome = ad.AnnData(
+    X=scipy.sparse.hstack([adata_GEX.X, adata_ATAC.X]),
+    obs=adata_GEX.obs,
+    var=pd.DataFrame(index=combined_var_names)
+)
+print(multiome)
 print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
 def clustering(adata):
-    sc.pp.neighbors(adata, use_rep='X')
+    sc.pp.pca(adata)
+    sc.pp.neighbors(adata, use_rep="X_pca")
     resolution_values = [0.3, 0.5, 0.7, 0.9, 1.0, 1.1, 1.2]  # corresponding to approximately 22 categories
     true_labels = adata.obs["cell_type"]
     best_ari, best_nmi = 0, 0
