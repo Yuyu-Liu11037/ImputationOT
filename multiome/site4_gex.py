@@ -28,7 +28,6 @@ wandb.init(
 
 multiome = ad.read_h5ad("/workspace/ImputationOT/data/multiome_processed.h5ad")   # 22 cell types
 multiome.var_names_make_unique()
-multiome_copy = multiome.copy()
 
 #####################################################################################################################################
 print("Start preprocessing")
@@ -52,20 +51,17 @@ sc.pp.highly_variable_genes(
 
 num_atac = adata_ATAC.X.shape[1]
 # multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="first")   # left num_atac: ATAC, right 2832: GEX
-combined_var_names = adata_GEX.var_names.append(adata_ATAC.var_names)
 multiome = ad.AnnData(
-    X=scipy.sparse.hstack([adata_GEX.X, adata_ATAC.X]),
-    obs=adata_GEX.obs,
-    var=pd.DataFrame(index=combined_var_names)
+    X=scipy.sparse.hstack([adata_ATAC.X, adata_GEX.X]),
+    obs=adata_GEX.obs
 )
-print(multiome)
 print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
 def clustering(adata):
     sc.pp.pca(adata)
     sc.pp.neighbors(adata, use_rep="X_pca")
-    resolution_values = [0.3, 0.5, 0.7, 0.9, 1.0, 1.1, 1.2]  # corresponding to approximately 22 categories
+    resolution_values = [0.60, 0.65, 0.70, 0.75]  # corresponding to approximately 22 categories
     true_labels = adata.obs["cell_type"]
     best_ari, best_nmi = 0, 0
 

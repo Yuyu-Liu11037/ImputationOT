@@ -6,12 +6,12 @@ import ot
 import sys
 import anndata as ad
 import scanpy as sc
+import pandas as pd
 import wandb
 import sklearn
+import scipy.sparse
 from scipy.stats import pearsonr
-
-
-from ..utils import clustering
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 epochs = 100000
 device = 'cuda:0'
@@ -52,10 +52,32 @@ sc.pp.highly_variable_genes(
 )
 
 num_atac = adata_ATAC.X.shape[1]
-multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="first")   # left num_atac: ATAC, right 2832: GEX
-
-print(f"Finished preprocessing\n")
+# multiome = ad.concat([adata_ATAC, adata_GEX], axis=1, merge="first")   # left num_atac: ATAC, right 2832: GEX
+multiome = ad.AnnData(
+    X=scipy.sparse.hstack([adata_ATAC.X, adata_GEX.X]),
+    obs=adata_GEX.obs
+)
+print(f"Finish preprocessing\n")
 #####################################################################################################################################
+
+def clustering(adata):
+    sc.pp.pca(adata)
+    sc.pp.neighbors(adata, use_rep="X_pca")
+    resolution_values = [0.60, 0.65, 0.70, 0.75]  # corresponding to approximately 22 categories
+    true_labels = adata.obs["cell_type"]
+    best_ari, best_nmi = 0, 0
+
+    for resolution in resolution_values:
+        sc.tl.leiden(adata, resolution=resolution, flavor="igraph", n_iterations=2)
+        predicted_labels = adata.obs["leiden"]
+    
+        ari = adjusted_rand_score(true_labels, predicted_labels)
+        nmi = normalized_mutual_info_score(true_labels, predicted_labels)
+        print(f"{resolution} {ari} {nmi}")
+        best_ari = max(best_ari, ari)
+        best_nmi = max(best_nmi, nmi)
+
+    return best_ari, best_nmi
     
 X = multiome.X.toarray()
 X4 = X[-22224:].copy()
@@ -78,7 +100,7 @@ optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
-print("start optimizing")
+print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
