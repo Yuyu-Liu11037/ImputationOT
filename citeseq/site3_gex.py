@@ -25,9 +25,9 @@ wandb.init(
     project="ot",
 
     config={
-    "dataset": "NIPS2021-Cite-seq",
-    "epochs": epochs,
-    "missing data": "site3 gex"
+        "dataset": "NIPS2021-Cite-seq",
+        "epochs": epochs,
+        "missing data": "site3 gex"
     }
 )
 
@@ -91,7 +91,7 @@ for epoch in range(epochs):
     X3  = X_imputed[-SITE3_CELL:, :]
     GEX = torch.transpose(X_imputed[:, :FILLED_GEX], 0, 1)
     ADT = torch.transpose(X_imputed[:, FILLED_GEX:], 0, 1)
-    loss = 0.5 * ot.sliced_wasserstein_distance(X12, X3) + 0.5 * ot.sliced_wasserstein_distance(GEX, ADT)
+    loss = 0.5 * ot.sliced_wasserstein_distance(X12, X3, n_projections=2000) + 0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=2000)
 
     optimizer.zero_grad()
     loss.backward()
