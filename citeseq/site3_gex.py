@@ -1,13 +1,10 @@
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import ot
-import sys
 import anndata as ad
 import scanpy as sc
 import wandb
-import sklearn
 from scipy.stats import pearsonr
 
 
