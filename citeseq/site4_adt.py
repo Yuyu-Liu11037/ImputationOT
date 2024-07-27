@@ -15,6 +15,7 @@ epochs = 100000
 device = 'cuda:0'
 n_projections = 2000
 K = 9
+batch_size = 5000
 SITE1_CELL = 16311
 SITE2_CELL = 25171
 SITE3_CELL = 32029
@@ -78,7 +79,7 @@ optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
-C = torch.randn((2134, K), device=device, requires_grad=True) + torch.ones((2134, K), device=device, requires_grad=True)
+C = torch.randn((2134, K), device=device, requires_grad=True)
 print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
@@ -97,13 +98,13 @@ for epoch in range(epochs):
     X4 = X_imputed[-SITE4_CELL:, :]
     # GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
     # ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
-    Q12 = ot.sinkhorn(torch.ones(SITE1_CELL + SITE2_CELL, device=device) / (SITE1_CELL + SITE2_CELL), torch.ones(K, device=device) / K, -torch.mm(X12, C), 1e3, numItermax=100000)
-    Q4 = ot.sinkhorn(torch.ones(SITE4_CELL, device=device) / SITE4_CELL, torch.ones(K, device=device) / K, -torch.mm(X4, C), 1e3, numItermax=100000)
-    print(Q12 * 1e6)
-    print(Q4 * 1e6)
+    cost_matrix = -torch.mm(X12[:50], C)
+    cost_matrix = (cost_matrix - cost_matrix.mean()) / cost_matrix.std()
+    Q12 = ot.sinkhorn(torch.ones(50, device=device) / (50), torch.ones(K, device=device) / K, cost_matrix, 1, numItermax=10000)
+    Q4 = ot.sinkhorn(torch.ones(100, device=device) / 100, torch.ones(K, device=device) / K, -torch.mm(X4[:100], C), 1, numItermax=10000)
     # cluster_dis = SamplesLoss("sinkhorn", reach=.5)(Q12, Q4)
     M = ot.dist(Q12, Q4)
-    cluster_dis = ot.sinkhorn2(torch.ones(len(M), device=device) / len(M), torch.ones(len(M[0]), device=device) / len(M[0]), M, 1e2, numItermax=3)
+    cluster_dis = ot.sinkhorn2(torch.ones(len(M), device=device) / len(M), torch.ones(len(M[0]), device=device) / len(M[0]), M, 1)
     print(cluster_dis.item())
     sys.exit()
     loss = (0.4 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
