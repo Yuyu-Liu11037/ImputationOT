@@ -13,6 +13,7 @@ epochs = 100000
 device = 'cuda:0'
 n_projections = 2000
 clustering_interval = 50
+K = 9
 SITE1_CELL = 16311
 SITE2_CELL = 25171
 SITE3_CELL = 32029
@@ -91,7 +92,7 @@ def compute_masses(labels):
     return counts / counts.sum()
 
 
-clustering_distance = .0
+C = torch.randn((2134, K), device=device, requires_grad=True)
 print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
@@ -106,35 +107,17 @@ for epoch in range(epochs):
         print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         # wandb.log({"Iteration": epoch + 1, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
-    if (epoch + 1) % clustering_interval == 0:
-        citeseq.X = X_imputed[:SITE1_CELL + SITE2_CELL]
-        sc.pp.pca(citeseq)
-        sc.pp.neibors(citeseq, use_rep="X_pca")
-        sc.tl.leiden(citeseq, resolution=.15)
-        print(citeseq.obs["leiden"])
-        site12_labels = citeseq.obs["leiden"].astype(int).values
-        centers1, labels1 = compute_centers(citeseq, site12_labels)
-        masses1 = compute_masses(site12_labels)
-
-        citeseq.X = np.vstack((X3, X_imputed[-SITE4_CELL:].detach().cpu().numpy()))
-        sc.pp.pca(citeseq)
-        sc.pp.neibors(citeseq, use_rep="X_pca")
-        sc.tl.leiden(citeseq, resolution=.15)
-        print(citeseq.obs["leiden"])
-        site4_labels = citeseq.obs["leiden"].astype(int).values
-        centers4, labels4 = compute_centers(citeseq, site4_labels)
-        masses4 = compute_masses(site4_labels)
-
-        M = ot.dist(centers4, centers1, metric='euclidean')
-        clustering_distance = ot.sinkhorn2(masses4, masses1, M, 1e-3)
-
     X12 = X_imputed[:SITE1_CELL + SITE2_CELL, :]
     X4 = X_imputed[-SITE4_CELL:, :]
     GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
     ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
+    # Q12 = sinkhorn(-X12 * C)
+    # Q4 = sinkhorn(-X4 * C)
+    Q12 = ot.sinkhorn(torch.ones(SITE1_CELL + SITE2_CELL) / (SITE1_CELL + SITE2_CELL), torch.ones(K) / K, -torch.mm(X12, C), 1e3)
+    Q4 = ot.sinkhorn(torch.ones(SITE4_CELL) / SITE4_CELL, torch.ones(K) / K, -torch.mm(X4, C), 1e3)
     loss = (0.4 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
             0.4 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
-            0.2 * clustering_distance)
+            0.2 * ot.sliced_wasserstein_distance(Q12, Q4))
 
     optimizer.zero_grad()
     loss.backward()
