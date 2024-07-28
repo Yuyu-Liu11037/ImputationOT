@@ -98,10 +98,22 @@ for epoch in range(epochs):
     X4 = X_imputed[-SITE4_CELL:, :]
     # GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
     # ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
-    cost_matrix = -torch.mm(X12[:50], C)
-    cost_matrix = (cost_matrix - cost_matrix.mean()) / cost_matrix.std()
-    Q12 = ot.sinkhorn(torch.ones(50, device=device) / (50), torch.ones(K, device=device) / K, cost_matrix, 1, numItermax=10000)
-    Q4 = ot.sinkhorn(torch.ones(100, device=device) / 100, torch.ones(K, device=device) / K, -torch.mm(X4[:100], C), 1, numItermax=10000)
+    Q12 = ot.sinkhorn(torch.ones(50, device=device) / (50), 
+                      torch.ones(K, device=device) / K, 
+                      torch.nn.functional.normalize(torch.mm(X12[:50], C), dim=1, p=2), 
+                      1)
+    print(Q12)
+    Q12 = torch.nn.functional.normalize(Q12, dim=1, p=2)
+    print(Q12)
+    print()
+    Q4 = ot.sinkhorn(torch.ones(100, device=device) / 100, 
+                     torch.ones(K, device=device) / K, 
+                     torch.nn.functional.normalize(torch.mm(X4[:100], C), dim=1, p=2), 
+                     1)
+    print(Q4)
+    Q4 = torch.nn.functional.normalize(Q4, dim=1, p=2)
+    print(Q4)
+    print()
     # cluster_dis = SamplesLoss("sinkhorn", reach=.5)(Q12, Q4)
     M = ot.dist(Q12, Q4)
     cluster_dis = ot.sinkhorn2(torch.ones(len(M), device=device) / len(M), torch.ones(len(M[0]), device=device) / len(M[0]), M, 1)
