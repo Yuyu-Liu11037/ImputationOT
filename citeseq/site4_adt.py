@@ -1,6 +1,8 @@
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import ot
 import anndata as ad
 import scanpy as sc
@@ -15,23 +17,23 @@ epochs = 100000
 device = 'cuda:0'
 n_projections = 2000
 K = 9
-batch_size = 5000
+batch_size = 10000
 SITE1_CELL = 16311
 SITE2_CELL = 25171
 SITE3_CELL = 32029
 SITE4_CELL = 16750
 FILLED_GEX = 2000
 
-# wandb.init(
-#     project="ot",
+wandb.init(
+    project="ot",
 
-#     config={
-#         "dataset": "NIPS2021-Cite-seq",
-#         "epochs": epochs,
-#         "missing data": "site4 adt",
-#         "n_projections": 2000
-#     }
-# )
+    config={
+        "dataset": "NIPS2021-Cite-seq",
+        "epochs": epochs,
+        "missing data": "site4 adt",
+        "n_projections": 2000
+    }
+)
 
 citeseq = ad.read_h5ad("/workspace/ImputationOT/data/citeseq_processed.h5ad")
 citeseq.var_names_make_unique()
@@ -57,12 +59,11 @@ print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
 X = citeseq.X.toarray()
-# X3 = X[SITE1_CELL + SITE2_CELL:SITE1_CELL + SITE2_CELL + SITE3_CELL].copy()
+X3 = X[SITE1_CELL + SITE2_CELL:SITE1_CELL + SITE2_CELL + SITE3_CELL].copy()
 X = torch.tensor(X).to(device)
 X = torch.cat((X[:SITE1_CELL + SITE2_CELL], X[-SITE4_CELL:]),
               dim=0)  # Matrix is too large. Remove certain rows to save memory.
-# ground_truth = X.clone()
-del citeseq
+ground_truth = X.clone()
 
 mask = torch.zeros(X.shape, dtype=torch.bool).to(device)
 mask[-SITE4_CELL:, 2000:] = True  # mask X(4,2)
@@ -75,59 +76,54 @@ imps = mean_values.repeat(SITE4_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-optimizer = optim.Adam([imps], lr=0.1)
+prototypes = nn.Linear(2134, K, bias=False).to(device)
+with torch.no_grad():
+    prototypes.weight = nn.Parameter(F.normalize(prototypes.weight))
+
+optimizer = optim.Adam([imps, prototypes.weight], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
-C = torch.randn((2134, K), device=device, requires_grad=True)
 print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
 
-    # if epoch == 0:
-    #     pearson_corr = pearsonr(X_imputed[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy(),
-    #                             ground_truth[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy())[0]
-    #     citeseq.X = np.vstack((X_imputed[:SITE1_CELL + SITE2_CELL].detach().cpu().numpy(), X3,
-    #                            X_imputed[-SITE4_CELL:].detach().cpu().numpy()))
-    #     ari, nmi = tools.clustering(citeseq)
-    #     print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
-        # wandb.log({"Iteration": epoch + 1, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+    if epoch == 0:
+        pearson_corr = pearsonr(X_imputed[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy(),
+                                ground_truth[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy())[0]
+        citeseq.X = np.vstack((X_imputed[:SITE1_CELL + SITE2_CELL].detach().cpu().numpy(), X3,
+                               X_imputed[-SITE4_CELL:].detach().cpu().numpy()))
+        ari, nmi = tools.clustering(citeseq)
+        print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
+        wandb.log({"Iteration": epoch + 1, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
     X12 = X_imputed[:SITE1_CELL + SITE2_CELL, :]
     X4 = X_imputed[-SITE4_CELL:, :]
-    # GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
-    # ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
-    Q12 = ot.sinkhorn(torch.ones(50, device=device) / (50), 
+    GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
+    ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
+    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:batch_size]
+    indices2 = torch.randperm(SITE4_CELL, device=device)[:batch_size]
+    Q12 = ot.sinkhorn(torch.ones(batch_size, device=device) / batch_size, 
                       torch.ones(K, device=device) / K, 
-                      torch.nn.functional.normalize(torch.mm(X12[:50], C), dim=1, p=2), 
+                      F.normalize(prototypes(X12[indices1])), 
                       1)
-    print(Q12)
-    Q12 = torch.nn.functional.normalize(Q12, dim=1, p=2)
-    print(Q12)
-    print()
-    Q4 = ot.sinkhorn(torch.ones(100, device=device) / 100, 
+    Q12 = F.normalize(Q12)
+    Q4 = ot.sinkhorn(torch.ones(batch_size, device=device) / batch_size, 
                      torch.ones(K, device=device) / K, 
-                     torch.nn.functional.normalize(torch.mm(X4[:100], C), dim=1, p=2), 
+                     F.normalize(prototypes(X4[indices2])), 
                      1)
-    print(Q4)
-    Q4 = torch.nn.functional.normalize(Q4, dim=1, p=2)
-    print(Q4)
-    print()
-    # cluster_dis = SamplesLoss("sinkhorn", reach=.5)(Q12, Q4)
+    Q4 = F.normalize(Q4)
     M = ot.dist(Q12, Q4)
-    cluster_dis = ot.sinkhorn2(torch.ones(len(M), device=device) / len(M), torch.ones(len(M[0]), device=device) / len(M[0]), M, 1)
-    print(cluster_dis.item())
-    sys.exit()
-    loss = (0.4 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
-            0.4 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
-            0.2 * ot.sliced_wasserstein_distance(Q12, Q4))
+    cluster_dis = ot.sinkhorn2(torch.ones(len(M), device=device) / len(M), torch.ones(len(M[0]), device=device) / len(M[0]), M, 5)
+    loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
+            0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
+            cluster_dis)
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     scheduler.step()
-    # print(C)
 
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
@@ -141,4 +137,4 @@ for epoch in range(epochs):
         print(
             f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, "
             f"nmi: {nmi:.4f}")
-        # wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+        wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
