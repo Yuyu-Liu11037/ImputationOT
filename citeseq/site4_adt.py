@@ -13,7 +13,7 @@ from geomloss import SamplesLoss
 
 from utils import tools
 
-epochs = 100000
+epochs = 5000
 device = 'cuda:0'
 n_projections = 2000
 K = 9
@@ -26,6 +26,7 @@ FILLED_GEX = 2000
 
 wandb.init(
     project="ot",
+    name="c-4adt-2000",
 
     config={
         "dataset": "NIPS2021-Cite-seq",
@@ -54,7 +55,7 @@ sc.pp.highly_variable_genes(
     n_top_genes=2000,
     subset=True
 )
-citeseq = ad.concat([adata_GEX, adata_ADT], axis=1, merge="same")  # X(:,1): GEX, X(:,2): ADT
+citeseq = ad.concat([adata_GEX, adata_ADT], axis=1, merge="first")  # X(:,1): GEX, X(:,2): ADT
 print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
@@ -102,23 +103,23 @@ for epoch in range(epochs):
     X4 = X_imputed[-SITE4_CELL:, :]
     GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
     ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
-    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:batch_size]
-    indices2 = torch.randperm(SITE4_CELL, device=device)[:batch_size]
-    Q12 = ot.sinkhorn(torch.ones(batch_size, device=device) / batch_size, 
-                      torch.ones(K, device=device) / K, 
-                      F.normalize(prototypes(X12[indices1])), 
-                      1)
-    Q12 = F.normalize(Q12)
-    Q4 = ot.sinkhorn(torch.ones(batch_size, device=device) / batch_size, 
-                     torch.ones(K, device=device) / K, 
-                     F.normalize(prototypes(X4[indices2])), 
-                     1)
-    Q4 = F.normalize(Q4)
-    M = ot.dist(Q12, Q4)
-    cluster_dis = ot.sinkhorn2(torch.ones(len(M), device=device) / len(M), torch.ones(len(M[0]), device=device) / len(M[0]), M, 5)
+    # indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:batch_size]
+    # indices2 = torch.randperm(SITE4_CELL, device=device)[:batch_size]
+    # Q12 = ot.sinkhorn(torch.ones(batch_size, device=device) / batch_size, 
+    #                   torch.ones(K, device=device) / K, 
+    #                   F.normalize(prototypes(X12[indices1])), 
+    #                   1)
+    # Q12 = F.normalize(Q12)
+    # Q4 = ot.sinkhorn(torch.ones(batch_size, device=device) / batch_size, 
+    #                  torch.ones(K, device=device) / K, 
+    #                  F.normalize(prototypes(X4[indices2])), 
+    #                  1)
+    # Q4 = F.normalize(Q4)
+    # M = ot.dist(Q12, Q4)
+    # cluster_dis = ot.sinkhorn2(torch.ones(len(M), device=device) / len(M), torch.ones(len(M[0]), device=device) / len(M[0]), M, 1)
+    # cluster_w = 1.5 * (1 - torch.exp(-0.001 * (epoch - 1000))) if epoch > 1000 else 0.1
     loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
-            0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
-            cluster_dis)
+            0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections))
 
     optimizer.zero_grad()
     loss.backward()
