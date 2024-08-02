@@ -85,6 +85,34 @@ optimizer = optim.Adam([imps, prototypes.weight], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
+def sinkhorn(X, n_iter=20):
+    X = torch.exp(X)
+    for _ in range(n_iter):
+        X = X / X.sum(dim=1, keepdim=True)
+        X = X / X.sum(dim=0, keepdim=True)
+    return X
+
+def gumbel_sinkhorn(X, tau=1.0, n_iter=20, epsilon=1e-6):
+    noise = -torch.log(-torch.log(torch.rand_like(X) + epsilon) + epsilon)
+    X = (X + noise) / tau
+    return sinkhorn(X, n_iter)
+
+def dkm_clustering(W, k, tau=1.0, n_iter=100, tol=1e-4):
+    m, _ = W.shape
+    C = W[torch.randperm(m)[:k]]  # Initialize cluster centers
+    for _ in range(n_iter):
+        D = torch.cdist(W, C)
+        A = F.softmax(-D / tau, dim=1)
+        C_new = (A.T @ W) / A.sum(dim=0)[:, None]
+        if torch.norm(C_new - C) < tol:
+            break
+        C = C_new
+    return C
+
+def hungarian_matching_loss_with_P(M, P):
+    approximate_cost = (M * P).sum()
+    return approximate_cost
+
 print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
@@ -103,23 +131,18 @@ for epoch in range(epochs):
     X4 = X_imputed[-SITE4_CELL:, :]
     GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
     ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
-    # indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:batch_size]
-    # indices2 = torch.randperm(SITE4_CELL, device=device)[:batch_size]
-    # Q12 = ot.sinkhorn(torch.ones(batch_size, device=device) / batch_size, 
-    #                   torch.ones(K, device=device) / K, 
-    #                   F.normalize(prototypes(X12[indices1])), 
-    #                   1)
-    # Q12 = F.normalize(Q12)
-    # Q4 = ot.sinkhorn(torch.ones(batch_size, device=device) / batch_size, 
-    #                  torch.ones(K, device=device) / K, 
-    #                  F.normalize(prototypes(X4[indices2])), 
-    #                  1)
-    # Q4 = F.normalize(Q4)
-    # M = ot.dist(Q12, Q4)
-    # cluster_dis = ot.sinkhorn2(torch.ones(len(M), device=device) / len(M), torch.ones(len(M[0]), device=device) / len(M[0]), M, 1)
-    # cluster_w = 1.5 * (1 - torch.exp(-0.001 * (epoch - 1000))) if epoch > 1000 else 0.1
+    C1 = dkm_clustering(X12, K)
+    C2 = dkm_clustering(X4, K)
+    M = torch.cdist(C1, C2)
+    P = gumbel_sinkhorn(M)
+    h_loss = hungarian_matching_loss_with_P(M, P)
+    if epoch % 50 == 0:
+        print(h_loss.item())
+    if epoch % 300 == 0:
+        sys.exit()
     loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
-            0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections))
+            0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
+            h_loss)
 
     optimizer.zero_grad()
     loss.backward()
