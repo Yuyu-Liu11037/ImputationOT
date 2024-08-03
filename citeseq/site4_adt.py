@@ -23,7 +23,6 @@ if torch.cuda.is_available():
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-
 epochs = 8000
 device = 'cuda:0'
 n_projections = 2000
@@ -153,10 +152,10 @@ for epoch in range(epochs):
     optimizer.step()
     scheduler.step()
 
-    X_imputed = X.detach().clone()
-    X_imputed[mask] = imps
-
     if (epoch + 1) % 300 == 0:
+        X_imputed = X.detach().clone()
+        X_imputed[mask] = imps
+        
         pearson_corr = pearsonr(X_imputed[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy(),
                                 ground_truth[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy())[0]
         citeseq.X = np.vstack((X_imputed[:SITE1_CELL + SITE2_CELL].detach().cpu().numpy(), X3,
