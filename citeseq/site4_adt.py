@@ -8,12 +8,23 @@ import anndata as ad
 import scanpy as sc
 import wandb
 import sys
+import random
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 
 from utils import tools
 
-epochs = 5000
+seed = 2024
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+
+epochs = 8000
 device = 'cuda:0'
 n_projections = 2000
 K = 9
@@ -26,13 +37,14 @@ FILLED_GEX = 2000
 
 wandb.init(
     project="ot",
-    name="c-4adt-2000",
+    name="c-4adt-clt2-0.01",
 
     config={
         "dataset": "NIPS2021-Cite-seq",
         "epochs": epochs,
         "missing data": "site4 adt",
-        "n_projections": 2000
+        "n_projections": 2000,
+        "h_loss weight": 0.01
     }
 )
 
@@ -77,11 +89,7 @@ imps = mean_values.repeat(SITE4_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-prototypes = nn.Linear(2134, K, bias=False).to(device)
-with torch.no_grad():
-    prototypes.weight = nn.Parameter(F.normalize(prototypes.weight))
-
-optimizer = optim.Adam([imps, prototypes.weight], lr=0.1)
+optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
@@ -136,13 +144,9 @@ for epoch in range(epochs):
     M = torch.cdist(C1, C2)
     P = gumbel_sinkhorn(M)
     h_loss = hungarian_matching_loss_with_P(M, P)
-    if epoch % 50 == 0:
-        print(h_loss.item())
-    if epoch % 300 == 0:
-        sys.exit()
     loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
             0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
-            h_loss)
+            0.01 * h_loss)
 
     optimizer.zero_grad()
     loss.backward()
