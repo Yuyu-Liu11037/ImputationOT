@@ -10,7 +10,6 @@ import wandb
 import sys
 import random
 from scipy.stats import pearsonr
-from geomloss import SamplesLoss
 
 from utils import tools
 
@@ -18,8 +17,7 @@ seed = 2024
 random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed(seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
@@ -89,36 +87,14 @@ optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
-def sinkhorn(X, n_iter=20, epsilon=1e-6):
-    # print(f"befor exp: {torch.max(X).item():.4f}")
-    X = torch.exp(X)
-    # print(f"after exp: {torch.max(X).item():.4f}")
-    # print()
-    for _ in range(n_iter):
-        X = X / (X.sum(dim=1, keepdim=True) + epsilon)
-        X = X / (X.sum(dim=0, keepdim=True) + epsilon)
-    return X
-
 def gumbel_sinkhorn(X, tau=1.0, n_iter=20, epsilon=1e-6):
     noise = -torch.log(-torch.log(torch.rand_like(X) + epsilon) + epsilon)
     X = (X + noise) / tau
-    return sinkhorn(X, n_iter)
-
-def dkm_clustering(W, k, tau=1.0, n_iter=100, tol=1e-4):
-    m, _ = W.shape
-    C = W[torch.randperm(m)[:k]]  # Initialize cluster centers
+    X = torch.exp(X)
     for _ in range(n_iter):
-        D = torch.cdist(W, C)
-        A = F.softmax(-D / tau, dim=1)
-        C_new = (A.T @ W) / A.sum(dim=0)[:, None]
-        if torch.norm(C_new - C) < tol:
-            break
-        C = C_new
-    return C
-
-def hungarian_matching_loss_with_P(M, P):
-    approximate_cost = (M * P).sum()
-    return approximate_cost
+        X /= X.sum(dim=1, keepdim=True)
+        X /= X.sum(dim=0, keepdim=True)
+    return X
 
 print("Start optimizing")
 for epoch in range(epochs):
@@ -136,12 +112,12 @@ for epoch in range(epochs):
     X3  = X_imputed[-SITE3_CELL:, :]
     GEX = torch.transpose(X_imputed[:, :FILLED_GEX], 0, 1)
     ADT = torch.transpose(X_imputed[:, FILLED_GEX:], 0, 1)
-    C1 = dkm_clustering(X12, K)
-    C2 = dkm_clustering(X3, K)
-    M = torch.cdist(C1, C2)
-    M = F.normalize(M)
-    P = gumbel_sinkhorn(M)   # error: nan
-    h_loss = hungarian_matching_loss_with_P(M, P)
+    dkm = tools.DKM(num_clusters=10)
+    _, _, C1 = dkm(X12)
+    _, _, C2 = dkm(X3)
+    M = F.normalize(torch.cdist(C1, C2))
+    P = gumbel_sinkhorn(M)
+    h_loss = (M * P).sum()
     if torch.isnan(h_loss):
         print(f"{epoch}: M range({torch.min(M).item():.4f}, {torch.max(M).item():.4f}), P range({torch.min(P).item():.4f}, {torch.max(P).item():.4f}), h_loss({h_loss.item():.4f})")
         sys.exit()
