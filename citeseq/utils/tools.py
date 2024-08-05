@@ -45,10 +45,8 @@ class DKM(nn.Module):
 
     def forward(self, weights):
         if self.batch_size is None:
-            # Full batch processing
             compressed_weights, clusters, attn_matrix = self._process_full_batch(weights)
         else:
-            # Mini-batch processing
             compressed_weights, clusters, attn_matrix = self._process_mini_batches(weights)
         
         return compressed_weights, clusters, attn_matrix

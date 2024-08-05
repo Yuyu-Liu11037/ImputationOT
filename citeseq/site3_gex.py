@@ -23,9 +23,9 @@ torch.backends.cudnn.benchmark = False
 
 epochs = 8000
 device = 'cuda:0'
-K = 10
+K = 9
 n_projections = 2000
-batch_size = 8000
+batch_size = 5000
 SITE1_CELL = 16311
 SITE2_CELL = 25171
 SITE3_CELL = 32029
@@ -36,14 +36,13 @@ use_wandb = True
 if use_wandb:
     wandb.init(
         project="ot",
-        name="c-3gex-clt2",
+        name="c-3gex",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": epochs,
             "missing data": "site3 gex",
             "n_projections": 2000,
-            "h_loss weight": 0.01,
-            "n_classes": 10
+            "n_classes": 9
         }
     )
 
@@ -112,17 +111,21 @@ for epoch in range(epochs):
     GEX = torch.transpose(X_imputed[:, :FILLED_GEX], 0, 1)
     ADT = torch.transpose(X_imputed[:, FILLED_GEX:], 0, 1)
 
-    if epoch > 1000:
-        C1, _, _ = dkm(X12)   # C1 = [K, 2134]
-        C2, _, _ = dkm(X3)
+    # if epoch > 1000:
+    #     C1, _, _ = dkm(X12)   # C1 = [K, 2134]
+    #     C2, _, _ = dkm(X3)
     
-        M = F.normalize(torch.cdist(C1, C2))
-        P = tools.gumbel_sinkhorn(M)
-        h_loss = (M * P).sum()
-    w_h = 0 if epoch <= 1000 else 0.01
+    #     M = F.normalize(torch.cdist(C1, C2))
+    #     P = tools.gumbel_sinkhorn(M)
+    #     h_loss = (M * P).sum()
+    # if epoch < 1000:
+    #     w_h = 0
+    # elif epoch < 2500:
+    #     w_h = 0.01
+    # else:
+    #     w_h = 0.03
     loss = (0.5 * ot.sliced_wasserstein_distance(X12, X3, n_projections=n_projections) +
-            0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
-            w_h * h_loss)
+            0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections))
     print(f"{epoch}: h_loss = {h_loss.item():.4f}, loss = {loss.item():.4f}")
 
     optimizer.zero_grad()
