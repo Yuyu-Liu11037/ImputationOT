@@ -13,7 +13,6 @@ from scipy.stats import pearsonr
 
 from utils import tools
 
-# 设置随机种子
 seed = 2024
 random.seed(seed)
 np.random.seed(seed)
@@ -26,25 +25,27 @@ epochs = 8000
 device = 'cuda:0'
 K = 10
 n_projections = 2000
-batch_size = 5000
+batch_size = 8000
 SITE1_CELL = 16311
 SITE2_CELL = 25171
 SITE3_CELL = 32029
 SITE4_CELL = 16750
 FILLED_GEX = 2000
 
-wandb.init(
-    project="ot",
-    name="c-3gex-clt2",
-    config={
-        "dataset": "NIPS2021-Cite-seq",
-        "epochs": epochs,
-        "missing data": "site3 gex",
-        "n_projections": 2000,
-        "h_loss weight": 0.1,
-        "n_classes": 10
-    }
-)
+use_wandb = True
+if use_wandb:
+    wandb.init(
+        project="ot",
+        name="c-3gex-clt2",
+        config={
+            "dataset": "NIPS2021-Cite-seq",
+            "epochs": epochs,
+            "missing data": "site3 gex",
+            "n_projections": 2000,
+            "h_loss weight": 0.01,
+            "n_classes": 10
+        }
+    )
 
 citeseq = ad.read_h5ad("/workspace/ImputationOT/data/citeseq_processed.h5ad")
 citeseq.var_names_make_unique()
@@ -89,14 +90,15 @@ imps.requires_grad = True
 optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
-dkm = tools.DKM(num_clusters=K, batch_size=100).cuda()
+dkm = tools.DKM(num_clusters=K).cuda()
+h_loss = torch.zeros(1).to(device)
 
 print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
 
-    if epoch == 0:
+    if epoch == 0 and use_wandb:
         pearson_corr = pearsonr(X_imputed[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy(), ground_truth[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy())[0]
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi = tools.clustering(citeseq)
@@ -110,15 +112,17 @@ for epoch in range(epochs):
     GEX = torch.transpose(X_imputed[:, :FILLED_GEX], 0, 1)
     ADT = torch.transpose(X_imputed[:, FILLED_GEX:], 0, 1)
 
-    _, _, C1 = dkm(X12)
-    _, _, C2 = dkm(X3)
-
-    M = F.normalize(torch.cdist(C1, C2))
-    P = tools.gumbel_sinkhorn(M)
-    h_loss = (M * P).sum()
+    if epoch > 1000:
+        C1, _, _ = dkm(X12)   # C1 = [K, 2134]
+        C2, _, _ = dkm(X3)
+    
+        M = F.normalize(torch.cdist(C1, C2))
+        P = tools.gumbel_sinkhorn(M)
+        h_loss = (M * P).sum()
+    w_h = 0 if epoch <= 1000 else 0.01
     loss = (0.5 * ot.sliced_wasserstein_distance(X12, X3, n_projections=n_projections) +
             0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
-            0.1 * h_loss)
+            w_h * h_loss)
     print(f"{epoch}: h_loss = {h_loss.item():.4f}, loss = {loss.item():.4f}")
 
     optimizer.zero_grad()
@@ -134,4 +138,5 @@ for epoch in range(epochs):
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi = tools.clustering(citeseq)
         print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
-        wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+        if use_wandb:
+            wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})

@@ -99,7 +99,7 @@ class DKM(nn.Module):
             dist_matrix = self._compute_distances(batch_weights, clusters)
             attn_matrix = F.softmax(dist_matrix / self.temperature, dim=-1)
             compressed_weights[i:i+self.batch_size] = torch.matmul(attn_matrix, clusters)
-            torch.cuda.empty_cache()  # Release unreferenced memory
+            torch.cuda.empty_cache() 
         
         return compressed_weights, clusters, attn_matrix
 
