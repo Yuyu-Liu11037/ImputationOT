@@ -24,6 +24,16 @@ def clustering(adata):
     return best_ari, best_nmi
 
 
+def gumbel_sinkhorn(X, tau=1.0, n_iter=20, epsilon=1e-6):
+    noise = -torch.log(-torch.log(torch.rand_like(X) + epsilon) + epsilon)
+    X = (X + noise) / tau
+    X = torch.exp(X)
+    for _ in range(n_iter):
+        X = X / X.sum(dim=1, keepdim=True)
+        X = X / X.sum(dim=0, keepdim=True)
+    return X
+
+
 class DKM(nn.Module):
     def __init__(self, num_clusters, temperature=1.0, max_iters=10, epsilon=1e-4, batch_size=None):
         super(DKM, self).__init__()

@@ -26,24 +26,25 @@ epochs = 8000
 device = 'cuda:0'
 K = 10
 n_projections = 2000
+batch_size = 5000
 SITE1_CELL = 16311
 SITE2_CELL = 25171
 SITE3_CELL = 32029
 SITE4_CELL = 16750
 FILLED_GEX = 2000
 
-# wandb.init(
-#     project="ot",
-#     name="c-3gex-clt2",
-#     config={
-#         "dataset": "NIPS2021-Cite-seq",
-#         "epochs": epochs,
-#         "missing data": "site3 gex",
-#         "n_projections": 2000,
-#         "h_loss weight": 0.1,
-#         "n_classes": 10
-#     }
-# )
+wandb.init(
+    project="ot",
+    name="c-3gex-clt2",
+    config={
+        "dataset": "NIPS2021-Cite-seq",
+        "epochs": epochs,
+        "missing data": "site3 gex",
+        "n_projections": 2000,
+        "h_loss weight": 0.1,
+        "n_classes": 10
+    }
+)
 
 citeseq = ad.read_h5ad("/workspace/ImputationOT/data/citeseq_processed.h5ad")
 citeseq.var_names_make_unique()
@@ -90,43 +91,31 @@ lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (e
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 dkm = tools.DKM(num_clusters=K, batch_size=100).cuda()
 
-def gumbel_sinkhorn(X, tau=1.0, n_iter=20, epsilon=1e-6):
-    noise = -torch.log(-torch.log(torch.rand_like(X) + epsilon) + epsilon)
-    X = (X + noise) / tau
-    X = torch.exp(X)
-    for _ in range(n_iter):
-        X /= X.sum(dim=1, keepdim=True)
-        X /= X.sum(dim=0, keepdim=True)
-    return X
-
 print("Start optimizing")
 for epoch in range(epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
 
-    # if epoch == 0:
-        # pearson_corr = pearsonr(X_imputed[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy(), ground_truth[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy())[0]
-        # citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
-        # ari, nmi = tools.clustering(citeseq)
-        # print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
-        # wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+    if epoch == 0:
+        pearson_corr = pearsonr(X_imputed[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy(), ground_truth[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy())[0]
+        citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
+        ari, nmi = tools.clustering(citeseq)
+        print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
+        wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
-    X12 = X_imputed[:SITE1_CELL + SITE2_CELL, :]
-    X3  = X_imputed[-SITE3_CELL:, :]
+    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:batch_size]
+    indices2 = torch.randperm(SITE3_CELL, device=device)[:batch_size]
+    X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
+    X3  = X_imputed[-SITE3_CELL:][indices2]
     GEX = torch.transpose(X_imputed[:, :FILLED_GEX], 0, 1)
     ADT = torch.transpose(X_imputed[:, FILLED_GEX:], 0, 1)
 
     _, _, C1 = dkm(X12)
-    torch.cuda.empty_cache()
     _, _, C2 = dkm(X3)
-    torch.cuda.empty_cache()
 
     M = F.normalize(torch.cdist(C1, C2))
-    P = gumbel_sinkhorn(M)
+    P = tools.gumbel_sinkhorn(M)
     h_loss = (M * P).sum()
-    if torch.isnan(h_loss):
-        print(f"{epoch}: M range({torch.min(M).item():.4f}, {torch.max(M).item():.4f}), P range({torch.min(P).item():.4f}, {torch.max(P).item():.4f}), h_loss({h_loss.item():.4f})")
-        sys.exit()
     loss = (0.5 * ot.sliced_wasserstein_distance(X12, X3, n_projections=n_projections) +
             0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
             0.1 * h_loss)
@@ -145,4 +134,4 @@ for epoch in range(epochs):
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi = tools.clustering(citeseq)
         print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
-        # wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+        wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
