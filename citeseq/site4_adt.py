@@ -36,7 +36,7 @@ use_wandb = True
 if use_wandb:
     wandb.init(
         project="ot",
-        name="c-4adt-clt2-3",
+        name="c-4adt-clt2-2",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": epochs,
@@ -105,20 +105,21 @@ for epoch in range(epochs):
         print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
-    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:batch_size]
-    indices2 = torch.randperm(SITE4_CELL, device=device)[:batch_size]
-    X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
-    X4  = X_imputed[-SITE4_CELL:][indices2]
+    X12 = X_imputed[:SITE1_CELL + SITE2_CELL]
+    X4  = X_imputed[-SITE4_CELL:]
     GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
     ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
-    
-    _, _, C1 = dkm(X12)   # [batch_size, n_classes]
-    _, _, C2 = dkm(X4)
-    M = torch.cdist(C1, C2)
+
+    # soft clustering assignment
+    indices = torch.randperm(SITE1_CELL + SITE2_CELL + SITE4_CELL, device=device)[:batch_size]
+    _, C1, _ = dkm(X_imputed[:, :2000][indices])   # [batch_size, n_classes]
+    _, C2, _ = dkm(X_imputed[:, 2000:][indices])
+    # hungarian matching loss
+    M = torch.cdist(torch.t(C1), torch.t(C2))
     P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
     h_loss = (M * P).sum()
     
-    w_h = 0 if epoch <= 1000 else 0.0001
+    w_h = 0 if epoch <= 1000 else 0.0003
     loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
             0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
             w_h * h_loss)
