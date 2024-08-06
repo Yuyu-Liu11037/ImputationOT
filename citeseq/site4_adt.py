@@ -23,7 +23,7 @@ torch.backends.cudnn.benchmark = False
 
 epochs = 8000
 device = 'cuda:0'
-K = 10
+n_classes = 9
 n_projections = 2000
 batch_size = 5000
 SITE1_CELL = 16311
@@ -36,14 +36,14 @@ use_wandb = True
 if use_wandb:
     wandb.init(
         project="ot",
-        name="c-4adt-clt2",
+        name="c-4adt-clt2-3",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": epochs,
             "missing data": "site3 gex",
             "n_projections": 2000,
-            "h_loss weight": 0.01,
-            "n_classes": 10
+            "h_loss weight": 0.0001,
+            "n_classes": 9
         }
     )
 
@@ -90,7 +90,7 @@ imps.requires_grad = True
 optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
-dkm = tools.DKM(num_clusters=K).cuda()
+dkm = tools.DKM(num_clusters=n_classes, max_iters=5, epsilon=1e-2).cuda()
 h_loss = torch.zeros(1).to(device)
 
 print("Start optimizing")
@@ -112,14 +112,13 @@ for epoch in range(epochs):
     GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
     ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
     
-    if epoch > 1000:
-        C1, _, _ = dkm(X12)
-        C2, _, _ = dkm(X4)
+    _, _, C1 = dkm(X12)   # [batch_size, n_classes]
+    _, _, C2 = dkm(X4)
+    M = torch.cdist(C1, C2)
+    P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
+    h_loss = (M * P).sum()
     
-        M = F.normalize(torch.cdist(C1, C2))
-        P = tools.gumbel_sinkhorn(M)
-        h_loss = (M * P).sum()
-    w_h = 0 if epoch <= 1000 else 0.01
+    w_h = 0 if epoch <= 1000 else 0.0001
     loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
             0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
             w_h * h_loss)
