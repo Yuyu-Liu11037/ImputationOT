@@ -28,6 +28,7 @@ parser.add_argument("--use_wandb", default=False)
 parser.add_argument("--dkm_iters", type=int, default=10)
 parser.add_argument("--n_classes", type=int, default=9)
 parser.add_argument("--dkm_eps", type=float, default=1e-4)
+parser.add_argument("--dkm_temperature", type=float, default=1.0)
 parser.add_argument("--aux_weight", type=float, default=0.01)
 args = parser.parse_args()
 
@@ -44,14 +45,15 @@ FILLED_GEX = 2000
 if args.use_wandb:
     wandb.init(
         project="ot",
-        name="c-4adt",
+        name="c-4adt-ablation1",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": epochs,
             "missing data": "site3 gex",
             "n_projections": 2000,
-            "h_loss weight": 0.0001,
-            "n_classes": args.n_classes
+            "h_loss weight": args.aux_weight,
+            "n_classes": args.n_classes,
+            "comment": "delete swd between modalities"
         }
     )
 
@@ -98,7 +100,7 @@ imps.requires_grad = True
 optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
-dkm = tools.DKM(num_clusters=args.n_classes, max_iters=args.dkm_iters, epsilon=args.dkm_eps).cuda()
+dkm = tools.DKM(num_clusters=args.n_classes, temperature=args.dkm_temperature, max_iters=args.dkm_iters, epsilon=args.dkm_eps).cuda()
 
 h_loss = torch.zeros(1).to(device)
 
@@ -116,15 +118,15 @@ for epoch in range(epochs):
 
     X12 = X_imputed[:SITE1_CELL + SITE2_CELL]
     X4  = X_imputed[-SITE4_CELL:]
-    GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
-    ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
+    # GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
+    # ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
 
     ### soft clustering assignment
     # indices = torch.randperm(SITE1_CELL + SITE2_CELL + SITE4_CELL, device=device)[:batch_size]
     # G_X1, G_X2, G_X3 = dkm(X_imputed[:, :2000][indices])
     # A_X1, A_X2, A_X3 = dkm(X_imputed[:, 2000:][indices])
-    # _, predicted_labels = torch.max(X3, dim=1)
-    # print(f"GEX, dkm num_clusters={args.n_classes}, max_iters = {args.dkm_iters}, epsilon={args.dkm_eps}")
+    # _, predicted_labels = torch.max(G_X3, dim=1)
+    # print(f"GEX, dkm num_clusters={args.n_classes}, temperature = {args.dkm_temperature}, max_iters = {args.dkm_iters}, epsilon={args.dkm_eps}")
     # print("clustering labels:", predicted_labels.cpu().numpy())
     # true_labels = citeseq.obs["cell_type"]
     # indices = indices.cpu().numpy()
@@ -132,6 +134,8 @@ for epoch in range(epochs):
     # print("true labels:", encoded_labels)
     # ari = adjusted_rand_score(predicted_labels.cpu().numpy(), encoded_labels)
     # nmi = normalized_mutual_info_score(predicted_labels.cpu().numpy(), encoded_labels)
+    # print(ari, nmi)
+    # sys.exit()
     ### hungarian matching loss
     # M = torch.cdist(torch.t(C1), torch.t(C2))
     # P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
@@ -139,9 +143,10 @@ for epoch in range(epochs):
     # h_loss = F.cross_entropy(G_X3, A_X3)
     
     w_h = 0 if epoch <= 1000 else args.aux_weight
-    loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
-            0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
-            w_h * h_loss)
+    # loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
+    #         0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
+    #         w_h * h_loss)
+    loss = ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections)
     print(f"{epoch}: h_loss = {h_loss.item():.4f}, loss = {loss.item():.4f}")
 
     optimizer.zero_grad()

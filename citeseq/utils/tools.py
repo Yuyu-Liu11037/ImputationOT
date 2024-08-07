@@ -67,7 +67,7 @@ class DKM(nn.Module):
         for _ in range(self.max_iters):
             dist_matrix = -torch.cdist(weights, clusters)
             attn_matrix = F.softmax(dist_matrix / self.temperature, dim=-1)
-            new_clusters = self._update_clusters(weights, attn_matrix)
+            new_clusters = torch.matmul(attn_matrix.t(), weights) / attn_matrix.sum(dim=0).unsqueeze(-1)
             if torch.norm(clusters - new_clusters) <= self.epsilon:
                 break
             clusters = new_clusters
@@ -89,10 +89,4 @@ class DKM(nn.Module):
 
         clusters = torch.stack(clusters).to(weights.device)
         return clusters
-
-    def _update_clusters(self, weights, attn_matrix):
-        weighted_sum = torch.matmul(attn_matrix.t(), weights)
-        cluster_weights = attn_matrix.sum(dim=0)
-        new_clusters = weighted_sum / cluster_weights.unsqueeze(-1)
-        return new_clusters
         
