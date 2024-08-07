@@ -9,7 +9,9 @@ import scanpy as sc
 import wandb
 import sys
 import random
+import argparse
 from scipy.stats import pearsonr
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 from utils import tools
 
@@ -21,9 +23,16 @@ torch.cuda.manual_seed(seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--use_wandb", default=False)
+parser.add_argument("--dkm_iters", type=int, default=10)
+parser.add_argument("--n_classes", type=int, default=9)
+parser.add_argument("--dkm_eps", type=float, default=1e-4)
+parser.add_argument("--aux_weight", type=float, default=0.01)
+args = parser.parse_args()
+
 epochs = 8000
 device = 'cuda:0'
-n_classes = 9
 n_projections = 2000
 batch_size = 5000
 SITE1_CELL = 16311
@@ -32,18 +41,17 @@ SITE3_CELL = 32029
 SITE4_CELL = 16750
 FILLED_GEX = 2000
 
-use_wandb = True
-if use_wandb:
+if args.use_wandb:
     wandb.init(
         project="ot",
-        name="c-4adt-clt2-2",
+        name="c-4adt",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": epochs,
             "missing data": "site3 gex",
             "n_projections": 2000,
             "h_loss weight": 0.0001,
-            "n_classes": 9
+            "n_classes": args.n_classes
         }
     )
 
@@ -90,7 +98,8 @@ imps.requires_grad = True
 optimizer = optim.Adam([imps], lr=0.1)
 lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
-dkm = tools.DKM(num_clusters=n_classes, max_iters=5, epsilon=1e-2).cuda()
+dkm = tools.DKM(num_clusters=args.n_classes, max_iters=args.dkm_iters, epsilon=args.dkm_eps).cuda()
+
 h_loss = torch.zeros(1).to(device)
 
 print("Start optimizing")
@@ -98,7 +107,7 @@ for epoch in range(epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
 
-    if epoch == 0 and use_wandb:
+    if epoch == 0 and args.use_wandb:
         pearson_corr = pearsonr(X_imputed[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy())[0]
         citeseq.X = np.vstack((X_imputed[:SITE1_CELL + SITE2_CELL].detach().cpu().numpy(), X3, X_imputed[-SITE4_CELL:].detach().cpu().numpy()))
         ari, nmi = tools.clustering(citeseq)
@@ -110,16 +119,26 @@ for epoch in range(epochs):
     GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
     ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
 
-    # soft clustering assignment
-    indices = torch.randperm(SITE1_CELL + SITE2_CELL + SITE4_CELL, device=device)[:batch_size]
-    _, C1, _ = dkm(X_imputed[:, :2000][indices])   # [batch_size, n_classes]
-    _, C2, _ = dkm(X_imputed[:, 2000:][indices])
-    # hungarian matching loss
-    M = torch.cdist(torch.t(C1), torch.t(C2))
-    P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
-    h_loss = (M * P).sum()
+    ### soft clustering assignment
+    # indices = torch.randperm(SITE1_CELL + SITE2_CELL + SITE4_CELL, device=device)[:batch_size]
+    # G_X1, G_X2, G_X3 = dkm(X_imputed[:, :2000][indices])
+    # A_X1, A_X2, A_X3 = dkm(X_imputed[:, 2000:][indices])
+    # _, predicted_labels = torch.max(X3, dim=1)
+    # print(f"GEX, dkm num_clusters={args.n_classes}, max_iters = {args.dkm_iters}, epsilon={args.dkm_eps}")
+    # print("clustering labels:", predicted_labels.cpu().numpy())
+    # true_labels = citeseq.obs["cell_type"]
+    # indices = indices.cpu().numpy()
+    # unique_labels, encoded_labels = np.unique(true_labels.to_numpy()[indices], return_inverse=True)
+    # print("true labels:", encoded_labels)
+    # ari = adjusted_rand_score(predicted_labels.cpu().numpy(), encoded_labels)
+    # nmi = normalized_mutual_info_score(predicted_labels.cpu().numpy(), encoded_labels)
+    ### hungarian matching loss
+    # M = torch.cdist(torch.t(C1), torch.t(C2))
+    # P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
+    # h_loss = (M * P).sum()
+    # h_loss = F.cross_entropy(G_X3, A_X3)
     
-    w_h = 0 if epoch <= 1000 else 0.0003
+    w_h = 0 if epoch <= 1000 else args.aux_weight
     loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
             0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
             w_h * h_loss)
@@ -130,7 +149,7 @@ for epoch in range(epochs):
     optimizer.step()
     scheduler.step()
 
-    if (epoch + 1) % 300 == 0:
+    if (epoch + 1) % 300 == 0 and args.use_wandb:
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
         
@@ -138,5 +157,4 @@ for epoch in range(epochs):
         citeseq.X = np.vstack((X_imputed[:SITE1_CELL + SITE2_CELL].detach().cpu().numpy(), X3, X_imputed[-SITE4_CELL:].detach().cpu().numpy()))
         ari, nmi = tools.clustering(citeseq)
         print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
-        if use_wandb:
-            wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+        wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})

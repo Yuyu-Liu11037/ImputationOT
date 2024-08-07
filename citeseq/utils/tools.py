@@ -34,6 +34,19 @@ def gumbel_sinkhorn(X, tau=1.0, n_iter=20, epsilon=1e-6):
     return X
 
 
+# def dkm_clustering(W, k, temperature=1.0, n_iter=100, epsilon=1e-4):
+#     m, _ = W.shape
+#     C = W[torch.randperm(m)[:k]]  # Initialize cluster centers
+#     for _ in range(n_iter):
+#         D = torch.cdist(W, C)
+#         A = F.softmax(-D / temperature, dim=1)
+#         C_new = (A.T @ W) / A.sum(dim=0)[:, None]
+#         if torch.norm(C_new - C) < epsilon:
+#             break
+#         C = C_new
+#     return C
+
+
 class DKM(nn.Module):
     """
     DKM clustering module.
@@ -52,7 +65,7 @@ class DKM(nn.Module):
         clusters = self._init_clusters(weights)
         
         for _ in range(self.max_iters):
-            dist_matrix = self._compute_distances(weights, clusters)
+            dist_matrix = -torch.cdist(weights, clusters)
             attn_matrix = F.softmax(dist_matrix / self.temperature, dim=-1)
             new_clusters = self._update_clusters(weights, attn_matrix)
             if torch.norm(clusters - new_clusters) <= self.epsilon:
@@ -76,12 +89,6 @@ class DKM(nn.Module):
 
         clusters = torch.stack(clusters).to(weights.device)
         return clusters
-
-    def _compute_distances(self, weights, clusters):
-        weights_expanded = weights.unsqueeze(1)
-        clusters_expanded = clusters.unsqueeze(0)
-        dist_matrix = -torch.norm(weights_expanded - clusters_expanded, dim=-1)
-        return dist_matrix
 
     def _update_clusters(self, weights, attn_matrix):
         weighted_sum = torch.matmul(attn_matrix.t(), weights)
