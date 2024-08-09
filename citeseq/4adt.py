@@ -11,6 +11,7 @@ import sys
 import random
 import argparse
 from scipy.stats import pearsonr
+from geomloss import SamplesLoss
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 from utils import tools
@@ -35,7 +36,7 @@ args = parser.parse_args()
 epochs = 8000
 device = 'cuda:0'
 n_projections = 2000
-batch_size = 5000
+batch_size = 3000
 SITE1_CELL = 16311
 SITE2_CELL = 25171
 SITE3_CELL = 32029
@@ -45,11 +46,11 @@ FILLED_GEX = 2000
 if args.use_wandb:
     wandb.init(
         project="ot",
-        name="c-4adt-ablation1",
+        name="c-4adt-SamplesLoss",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": epochs,
-            "missing data": "site3 gex",
+            "missing data": "site4 adt",
             "n_projections": 2000,
             "h_loss weight": args.aux_weight,
             "n_classes": args.n_classes,
@@ -116,10 +117,14 @@ for epoch in range(epochs):
         print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
-    X12 = X_imputed[:SITE1_CELL + SITE2_CELL]
-    X4  = X_imputed[-SITE4_CELL:]
-    # GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
-    # ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
+    
+    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:batch_size]
+    indices2 = torch.randperm(SITE4_CELL, device=device)[:batch_size]
+    X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
+    X4  = X_imputed[-SITE4_CELL:][indices2]
+    GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
+    ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
+    
 
     ### soft clustering assignment
     # indices = torch.randperm(SITE1_CELL + SITE2_CELL + SITE4_CELL, device=device)[:batch_size]
@@ -146,7 +151,7 @@ for epoch in range(epochs):
     # loss = (0.5 * ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections) +
     #         0.5 * ot.sliced_wasserstein_distance(GEX, ADT, n_projections=n_projections) +
     #         w_h * h_loss)
-    loss = ot.sliced_wasserstein_distance(X12, X4, n_projections=n_projections)
+    loss = 0.5 * 0.001 * SamplesLoss()(GEX, ADT) + 0.5 * SamplesLoss()(X12, X4)
     print(f"{epoch}: h_loss = {h_loss.item():.4f}, loss = {loss.item():.4f}")
 
     optimizer.zero_grad()
