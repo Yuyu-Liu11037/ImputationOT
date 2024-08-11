@@ -2,32 +2,49 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import ot
-import sys
 import anndata as ad
 import scanpy as sc
-import pandas as pd
 import wandb
-import sklearn
-import scipy.sparse
+import sys
+import random
+import argparse
 from scipy.stats import pearsonr
+from geomloss import SamplesLoss
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
-epochs = 100000
+seed = 2024
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--use_wandb", default=False)
+parser.add_argument("--batch_size", type=int, default=3000)
+parser.add_argument("--target_sum", type=int, default=1e4)
+args = parser.parse_args()
+
+epochs = 8000
 device = 'cuda:0'
 
-wandb.init(
-    project="ot",
-    name='m-50-counts',
-
-    config={
-        "dataset": "NIPS2021-Multiome",
-        "missing data": "site3 atac",
-        "epochs": epochs,
-        "use_normalization": True,
-        "target_sum": 1e4
-    }
-)
+if args.use_wandb:
+    wandb.init(
+        project="ot",
+        group="multiome-3atac", 
+        job_type="main",
+        name="SamplesLoss",
+        config={
+            "dataset": "NIPS2021-Multiome",
+            "missing data": "site3 atac",
+            "epochs": epochs,
+            "use_normalization": True,
+            "target_sum": args.target_sum
+        }
+    )
 
 multiome = ad.read_h5ad("/workspace/ImputationOT/data/multiome_processed.h5ad")
 multiome.var_names_make_unique()
@@ -39,8 +56,8 @@ adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
 adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
 ### step 1: normalize
 print("Use normalization")
-sc.pp.normalize_total(adata_GEX, target_sum=1e4, layer='counts')
-sc.pp.normalize_total(adata_ATAC, target_sum=1e4, layer='counts')
+sc.pp.normalize_total(adata_GEX, target_sum=args.target_sum, layer='counts')
+sc.pp.normalize_total(adata_ATAC, target_sum=args.target_sum, layer='counts')
 ### step 2: log transform
 sc.pp.log1p(adata_GEX, layer='counts')
 sc.pp.log1p(adata_ATAC, layer='counts')
@@ -103,7 +120,7 @@ for epoch in range(epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
 
-    if epoch == 0:
+    if epoch == 0 and args.use_wandb:
         pearson_corr = pearsonr(X_imputed[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy(), ground_truth[-14556:, :num_atac][nonzero_mask31].detach().cpu().numpy())[0]
         multiome.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi = clustering(multiome)
@@ -115,18 +132,23 @@ for epoch in range(epochs):
                    "nmi": nmi}
                  )
 
-    X12 = X_imputed[:47025, :]
-    X3  = X_imputed[-14556:, :]
+    indices1 = torch.randperm(32469, device=device)[:args.batch_size]
+    indices2 = torch.randperm(14556, device=device)[:args.batch_size]
+    X12 = X_imputed[:47025, :][indices1]
+    X3  = X_imputed[-14556:, :][indices2]
     ATAC = torch.transpose(X_imputed[:, :num_atac], 0, 1)
     GEX = torch.transpose(X_imputed[:, num_atac:], 0, 1)
-    loss = 0.5 * ot.sliced_wasserstein_distance(X12, X3, n_projections=50) + 0.5 * ot.sliced_wasserstein_distance(GEX, ATAC, n_projections=50)
+    loss = 0.1 * 0.5 * SamplesLoss()(GEX, ATAC) + 0.5 * SamplesLoss()(X12, X3)
+    loss1 = 0.1 * 0.5 * SamplesLoss()(GEX, ATAC)
+    loss2 = 0.5 * SamplesLoss()(X12, X3)
+    print(f"{epoch}: loss = {loss.item():.4f}, loss1 = {loss1.item():.4f}, loss2 = {loss2.item():.4f}")
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     scheduler.step()
 
-    if (epoch + 1) % 300 == 0:
+    if (epoch + 1) % 300 == 0 and args.use_wandb:
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
 
