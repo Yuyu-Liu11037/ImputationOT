@@ -5,10 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def clustering(adata):
+def clustering(adata, resolution_values=[0.10, 0.15, 0.20, 0.25]):
     sc.pp.pca(adata)
     sc.pp.neighbors(adata, use_rep="X_pca")
-    resolution_values = [0.10, 0.15, 0.20, 0.25]  # corresponding to approximately 9 categories
     true_labels = adata.obs["cell_type"]
     best_ari, best_nmi = 0, 0
 
@@ -21,7 +20,7 @@ def clustering(adata):
         best_ari = max(best_ari, ari)
         best_nmi = max(best_nmi, nmi)
 
-    return best_ari, best_nmi
+    return best_ari, best_nmi, predicted_labels
 
 
 def gumbel_sinkhorn(X, tau=1.0, n_iter=20, epsilon=1e-6):
