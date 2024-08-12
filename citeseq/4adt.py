@@ -44,13 +44,13 @@ if args.use_wandb:
         project="ot",
         group="citeseq-4adt", 
         job_type="aux",
-        name="SamplesLoss-aux",
+        name="SamplesLoss+H_loss",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": epochs,
             "missing data": "site4 adt",
             "h_loss weight": args.aux_weight,
-            "comment": "delete swd between modalities"
+            "comment": "nothing"
         }
     )
 
@@ -151,8 +151,10 @@ for epoch in range(epochs):
         h_loss = (M * P).sum()
     
     w_h = 0 if epoch <= 1000 else args.aux_weight
-    loss = 0.5 * 0.001 * SamplesLoss()(GEX, ADT) + 0.5 * SamplesLoss()(X12, X4)
-    print(f"{epoch}: h_loss = {h_loss.item():.4f}, loss = {loss.item():.4f}")
+    omics_loss = SamplesLoss()(GEX, ADT)
+    cells_loss = SamplesLoss()(X12, X4)
+    loss = 0.5 * 0.001 * omics_loss + 0.5 * cells_loss + w_h * h_loss
+    print(f"{epoch}: omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
     optimizer.zero_grad()
     loss.backward()
