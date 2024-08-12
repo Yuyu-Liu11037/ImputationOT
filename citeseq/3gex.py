@@ -17,9 +17,11 @@ from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from utils import tools
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--use_wandb", default=False)
-parser.add_argument("--aux_weight", type=float, default=0.01)
-parser.add_argument("--epochs", type=int, default=5000)
+parser.add_argument("--use_wandb", type=bool, default=False)
+parser.add_argument("--aux_weight", type=float, default=1)
+parser.add_argument("--epochs", type=int, default=2000)
+parser.add_argument("--eval_interval", type=int, default=100)
+parser.add_argument("--start_aux", type=int, default=400)
 parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
 args = parser.parse_args()
@@ -38,12 +40,12 @@ SITE3_CELL = 32029
 SITE4_CELL = 16750
 FILLED_GEX = 2000
 
-if args.use_wandb:
+if args.use_wandb is True:
     wandb.init(
         project="ot",
         group="citeseq-3gex", 
         job_type="aux",
-        name="SamplesLoss+h_loss",
+        name="SamplesLoss+fixed_h_loss",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": args.epochs,
@@ -92,8 +94,8 @@ imps = mean_values.repeat(SITE3_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-optimizer = optim.Adam([imps], lr=0.1)
-lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (args.epochs - 1000))
+optimizer = optim.Adam([imps])
+lambda_lr = lambda epoch: 0.1 if epoch < 200 else 0.001
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
 h_loss = torch.zeros(1).to(device)
@@ -103,7 +105,7 @@ for epoch in range(args.epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
 
-    if epoch == 0 and args.use_wandb:
+    if epoch == 0 and args.use_wandb is True:
         pearson_corr = pearsonr(X_imputed[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy(), ground_truth[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy())[0]
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi, _ = tools.clustering(citeseq)
@@ -117,10 +119,11 @@ for epoch in range(args.epochs):
     GEX = torch.transpose(X_imputed[:, :FILLED_GEX], 0, 1)
     ADT = torch.transpose(X_imputed[:, FILLED_GEX:], 0, 1)
 
-    if epoch > 1000:
-        ### calculate cluster results
-        labels1 = tools.calculate_cluster_labels(X12)
-        labels2 = tools.calculate_cluster_labels(X3)
+    if epoch >= args.start_aux:
+        if epoch % args.eval_interval == 0:
+            ### calculate cluster results
+            labels1 = tools.calculate_cluster_labels(X12)
+            labels2 = tools.calculate_cluster_labels(X3)
         ### calculate cluster centroids
         centroids1 = tools.calculate_cluster_centroids(X12, labels1)
         centroids2 = tools.calculate_cluster_centroids(X3, labels2)
@@ -130,7 +133,7 @@ for epoch in range(args.epochs):
         h_loss = (M * P).sum()
         # h_loss = nn.CrossEntropyLoss()(centroids1, centroids2)
     
-    w_h = 0 if epoch <= 1000 else args.aux_weight
+    w_h = 0 if epoch < args.start_aux else args.aux_weight
     omics_loss = SamplesLoss()(GEX, ADT)
     cells_loss = SamplesLoss()(X12, X3)
     loss = 0.5 * 0.001 * omics_loss + 0.5 * cells_loss + w_h * h_loss
@@ -141,7 +144,7 @@ for epoch in range(args.epochs):
     optimizer.step()
     scheduler.step()
 
-    if (epoch + 1) % 300 == 0 and args.use_wandb:
+    if (epoch + 1) % args.eval_interval == 0 and args.use_wandb is True:
         X_imputed = X.detach().clone()
         X_imputed[mask] = imps
 

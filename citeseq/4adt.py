@@ -95,8 +95,8 @@ imps = mean_values.repeat(SITE4_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-optimizer = optim.Adam([imps], lr=0.1)
-lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (args.epochs - 1000))
+optimizer = optim.Adam([imps])
+lambda_lr = lambda epoch: 0.1 if epoch < 200 else 0.001
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
 h_loss = torch.zeros(1).to(device)
