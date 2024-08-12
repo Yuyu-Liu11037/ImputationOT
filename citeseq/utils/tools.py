@@ -1,8 +1,9 @@
 import scanpy as sc
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
+import anndata as ad
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 
 def clustering(adata, resolution_values=[0.10, 0.15, 0.20, 0.25]):
@@ -33,59 +34,20 @@ def gumbel_sinkhorn(X, tau=1.0, n_iter=20, epsilon=1e-6):
     return X
 
 
-# def dkm_clustering(W, k, temperature=1.0, n_iter=100, epsilon=1e-4):
-#     m, _ = W.shape
-#     C = W[torch.randperm(m)[:k]]  # Initialize cluster centers
-#     for _ in range(n_iter):
-#         D = torch.cdist(W, C)
-#         A = F.softmax(-D / temperature, dim=1)
-#         C_new = (A.T @ W) / A.sum(dim=0)[:, None]
-#         if torch.norm(C_new - C) < epsilon:
-#             break
-#         C = C_new
-#     return C
+def calculate_cluster_labels(X):
+    adata = ad.AnnData(X.detach().cpu().numpy())
+    sc.pp.pca(adata)
+    sc.pp.neighbors(adata, use_rep="X_pca")
+    sc.tl.leiden(adata, resolution=0.2, flavor="igraph", n_iterations=2)
+    predicted_labels = adata.obs["leiden"]
+    cluster_labels = torch.tensor(predicted_labels.astype(int).values)
+    return cluster_labels
 
-
-class DKM(nn.Module):
-    """
-    DKM clustering module.
-
-    Returns:
-        attn_matrix: shape [cell, n_classes], a[i][j] := probability that cell i belongs to class j.
-    """
-    def __init__(self, num_clusters, temperature=1.0, max_iters=10, epsilon=1e-4):
-        super(DKM, self).__init__()
-        self.num_clusters = num_clusters
-        self.temperature = temperature
-        self.max_iters = max_iters
-        self.epsilon = epsilon
-
-    def forward(self, weights):
-        clusters = self._init_clusters(weights)
-        
-        for _ in range(self.max_iters):
-            dist_matrix = -torch.cdist(weights, clusters)
-            attn_matrix = F.softmax(dist_matrix / self.temperature, dim=-1)
-            new_clusters = torch.matmul(attn_matrix.t(), weights) / attn_matrix.sum(dim=0).unsqueeze(-1)
-            if torch.norm(clusters - new_clusters) <= self.epsilon:
-                break
-            clusters = new_clusters
-        
-        compressed_weights = torch.matmul(attn_matrix, clusters)
-        return compressed_weights, clusters, attn_matrix
-
-    def _init_clusters(self, weights):
-        # k-means++ initialization
-        clusters = []
-        clusters.append(weights[torch.randint(0, weights.size(0), (1,))].squeeze(0))
-
-        for _ in range(1, self.num_clusters):
-            dist_matrix = torch.stack([torch.norm(weights - cluster, dim=1) for cluster in clusters])
-            min_dist, _ = torch.min(dist_matrix, dim=0)
-            probs = min_dist / min_dist.sum()
-            new_cluster = weights[torch.multinomial(probs, 1)]
-            clusters.append(new_cluster.squeeze(0))
-
-        clusters = torch.stack(clusters).to(weights.device)
-        return clusters
-        
+def calculate_cluster_centroids(X, cluster_labels):
+    centroids = []
+    for cluster in cluster_labels.unique():
+        cluster_indices = (cluster_labels == cluster).nonzero(as_tuple=True)[0]
+        cluster_centroid = X[cluster_indices].mean(dim=0)
+        centroids.append(cluster_centroid)
+    centroids = torch.stack(centroids)
+    return centroids

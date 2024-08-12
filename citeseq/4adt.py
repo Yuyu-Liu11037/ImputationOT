@@ -16,23 +16,22 @@ from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 from utils import tools
 
-seed = 2024
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--use_wandb", default=False)
 parser.add_argument("--aux_weight", type=float, default=0.01)
+parser.add_argument("--epochs", type=int, default=5000)
+parser.add_argument("--batch_size", type=int, default=3000)
+parser.add_argument("--seed", type=int, default=2024)
 args = parser.parse_args()
 
-epochs = 8000
+random.seed(args.seed)
+np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+torch.cuda.manual_seed(args.seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
 device = 'cuda:0'
-n_projections = 2000
-batch_size = 3000
 SITE1_CELL = 16311
 SITE2_CELL = 25171
 SITE3_CELL = 32029
@@ -44,10 +43,10 @@ if args.use_wandb:
         project="ot",
         group="citeseq-4adt", 
         job_type="aux",
-        name="SamplesLoss+H_loss",
+        name="SamplesLoss+h_loss",
         config={
             "dataset": "NIPS2021-Cite-seq",
-            "epochs": epochs,
+            "epochs": args.epochs,
             "missing data": "site4 adt",
             "h_loss weight": args.aux_weight,
             "comment": "nothing"
@@ -95,31 +94,13 @@ imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
 optimizer = optim.Adam([imps], lr=0.1)
-lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (epochs - 1000))
+lambda_lr = lambda epoch: 1 if epoch < 1000 else 0.001 + (0.1 - 0.001) * (1 - (epoch - 1000) / (args.epochs - 1000))
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
 
 h_loss = torch.zeros(1).to(device)
 
-def calculate_cluster_labels(X):
-    adata = ad.AnnData(X.detach().cpu().numpy())
-    sc.pp.pca(adata)
-    sc.pp.neighbors(adata, use_rep="X_pca")
-    sc.tl.leiden(adata, resolution=0.2, flavor="igraph", n_iterations=2)
-    predicted_labels = adata.obs["leiden"]
-    cluster_labels = torch.tensor(predicted_labels.astype(int).values)
-    return cluster_labels
-
-def calculate_cluster_centroids(X, cluster_labels):
-    centroids = []
-    for cluster in cluster_labels.unique():
-        cluster_indices = (cluster_labels == cluster).nonzero(as_tuple=True)[0]
-        cluster_centroid = X[cluster_indices].mean(dim=0)
-        centroids.append(cluster_centroid)
-    centroids = torch.stack(centroids)
-    return centroids
-
 print("Start optimizing")
-for epoch in range(epochs):
+for epoch in range(args.epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
 
@@ -131,8 +112,8 @@ for epoch in range(epochs):
         wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
     
-    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:batch_size]
-    indices2 = torch.randperm(SITE4_CELL, device=device)[:batch_size]
+    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
+    indices2 = torch.randperm(SITE4_CELL, device=device)[:args.batch_size]
     X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
     X4  = X_imputed[-SITE4_CELL:][indices2]
     GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
@@ -140,15 +121,16 @@ for epoch in range(epochs):
 
     if epoch > 1000:
         ### calculate cluster results
-        labels1 = calculate_cluster_labels(X12)
-        labels2 = calculate_cluster_labels(X4)
+        labels1 = tools.calculate_cluster_labels(X12)
+        labels2 = tools.calculate_cluster_labels(X4)
         ### calculate cluster centroids
-        centroids1 = calculate_cluster_centroids(X12, labels1)
-        centroids2 = calculate_cluster_centroids(X4, labels2)
+        centroids1 = tools.calculate_cluster_centroids(X12, labels1)
+        centroids2 = tools.calculate_cluster_centroids(X4, labels2)
         ### calculate cluster loss
         M = torch.cdist(centroids1, centroids2)
         P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
         h_loss = (M * P).sum()
+        # h_loss = nn.CrossEntropyLoss()(centroids1, centroids2)
     
     w_h = 0 if epoch <= 1000 else args.aux_weight
     omics_loss = SamplesLoss()(GEX, ADT)
@@ -168,5 +150,5 @@ for epoch in range(epochs):
         pearson_corr = pearsonr(X_imputed[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-SITE4_CELL:, 2000:][nonzero_mask42].detach().cpu().numpy())[0]
         citeseq.X = np.vstack((X_imputed[:SITE1_CELL + SITE2_CELL].detach().cpu().numpy(), X3, X_imputed[-SITE4_CELL:].detach().cpu().numpy()))
         ari, nmi, _ = tools.clustering(citeseq)
-        print(f"Iteration {epoch + 1}/{epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
+        print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
