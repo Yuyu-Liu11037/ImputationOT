@@ -17,7 +17,7 @@ from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from utils import tools
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--use_wandb", type=bool, default=False)
+parser.add_argument("--use_wandb", action="store_true", default=False)
 parser.add_argument("--aux_weight", type=float, default=1)
 parser.add_argument("--epochs", type=int, default=2000)
 parser.add_argument("--eval_interval", type=int, default=100)
@@ -45,7 +45,7 @@ if args.use_wandb is True:
         project="ot",
         group="citeseq-3gex", 
         job_type="aux",
-        name="SamplesLoss+fixed_h_loss",
+        name="SamplesLoss+fixed_h_loss2",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": args.epochs,
@@ -94,9 +94,16 @@ imps = mean_values.repeat(SITE3_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-optimizer = optim.Adam([imps])
-lambda_lr = lambda epoch: 0.1 if epoch < 200 else 0.001
-scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
+def lr_lambda(epoch):
+    if epoch < 300:
+        return 0.1
+    elif 300 <= epoch < 1000:
+        return 0.101 - (epoch - 300) / 7000.0
+    else:
+        return 0.001
+
+optimizer = optim.Adam([imps], 1.0)
+scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 h_loss = torch.zeros(1).to(device)
 
