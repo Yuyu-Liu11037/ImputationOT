@@ -44,8 +44,8 @@ if args.use_wandb is True:
     wandb.init(
         project="ot",
         group="citeseq-4adt", 
-        job_type="aux",
-        name="SamplesLoss+fixed_h_loss",
+        job_type="ablation",
+        name="SamplesLoss+fixed_CE",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": args.epochs,
@@ -130,16 +130,17 @@ for epoch in range(args.epochs):
         centroids1 = tools.calculate_cluster_centroids(X12, labels1)
         centroids2 = tools.calculate_cluster_centroids(X4, labels2)
         ### calculate cluster loss
-        M = torch.cdist(centroids1, centroids2)
-        P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
-        h_loss = (M * P).sum()
-        # h_loss = nn.CrossEntropyLoss()(centroids1, centroids2)
+        # M = torch.cdist(centroids1, centroids2)
+        # P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
+        # h_loss = (M * P).sum()
+        h_loss = nn.CrossEntropyLoss()(centroids1, centroids2)
     
     w_h = 0 if epoch < args.start_aux else args.aux_weight
     omics_loss = SamplesLoss()(GEX, ADT)
     cells_loss = SamplesLoss()(X12, X4)
     loss = 0.5 * 0.001 * omics_loss + 0.5 * cells_loss + w_h * h_loss
     print(f"{epoch}: omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
+    sys.exit()
 
     optimizer.zero_grad()
     loss.backward()
