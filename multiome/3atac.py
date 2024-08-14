@@ -44,8 +44,8 @@ if args.use_wandb is True:
     wandb.init(
         project="ot",
         group="multiome-3atac", 
-        job_type="aux",
-        name="SamplesLoss+fixed_h_loss",
+        job_type="main",
+        name="SamplesLoss",
         config={
             "dataset": "NIPS2021-Multiome",
             "epochs": args.epochs,
@@ -137,18 +137,18 @@ for epoch in range(args.epochs):
     ATAC = torch.transpose(X_imputed[:, :num_atac], 0, 1)
     GEX = torch.transpose(X_imputed[:, num_atac:], 0, 1)
     
-    if epoch >= args.start_aux:
-        if epoch % args.eval_interval == 0:
-            ### calculate cluster results
-            labels1 = tools.calculate_cluster_labels(X12, resolution=0.65)
-            labels2 = tools.calculate_cluster_labels(X3, resolution=0.65)
-        ### calculate cluster centroids
-        centroids1 = tools.calculate_cluster_centroids(X12, labels1)
-        centroids2 = tools.calculate_cluster_centroids(X3, labels2)
-        ### calculate cluster loss
-        M = torch.cdist(centroids1, centroids2)
-        P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
-        h_loss = (M * P).sum()
+    # if epoch >= args.start_aux:
+    #     if epoch % args.eval_interval == 0:
+    #         ### calculate cluster results
+    #         labels1 = tools.calculate_cluster_labels(X12, resolution=0.65)
+    #         labels2 = tools.calculate_cluster_labels(X3, resolution=0.65)
+    #     ### calculate cluster centroids
+    #     centroids1 = tools.calculate_cluster_centroids(X12, labels1)
+    #     centroids2 = tools.calculate_cluster_centroids(X3, labels2)
+    #     ### calculate cluster loss
+    #     M = torch.cdist(centroids1, centroids2)
+    #     P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
+    #     h_loss = (M * P).sum()
     
     w_h = 0 if epoch < args.start_aux else args.aux_weight
     omics_loss = SamplesLoss()(GEX, ATAC)

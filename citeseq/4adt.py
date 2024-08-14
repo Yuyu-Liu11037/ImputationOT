@@ -45,7 +45,7 @@ if args.use_wandb is True:
         project="ot",
         group="citeseq-4adt", 
         job_type="ablation",
-        name="SamplesLoss+fixed_CE",
+        name="SamplesLoss-omics",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": args.epochs,
@@ -95,11 +95,20 @@ imps = mean_values.repeat(SITE4_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-optimizer = optim.Adam([imps])
-lambda_lr = lambda epoch: 0.1 if epoch < 200 else 0.001
-scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_lr)
+def lr_lambda(epoch):
+    if epoch < 300:
+        return 0.1
+    elif 300 <= epoch < 1000:
+        return 0.101 - (epoch - 300) / 7000.0
+    else:
+        return 0.001
+
+optimizer = optim.Adam([imps], 1.0)
+scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 h_loss = torch.zeros(1).to(device)
+omics_loss = torch.zeros(1).to(device)
+cells_loss = torch.zeros(1).to(device)
 
 print("Start optimizing")
 for epoch in range(args.epochs):
@@ -114,32 +123,33 @@ for epoch in range(args.epochs):
         wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
     
-    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
-    indices2 = torch.randperm(SITE4_CELL, device=device)[:args.batch_size]
-    X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
-    X4  = X_imputed[-SITE4_CELL:][indices2]
+    # indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
+    # indices2 = torch.randperm(SITE4_CELL, device=device)[:args.batch_size]
+    # X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
+    # X4  = X_imputed[-SITE4_CELL:][indices2]
     GEX = torch.transpose(X_imputed[:, :2000], 0, 1)
     ADT = torch.transpose(X_imputed[:, 2000:], 0, 1)
 
-    if epoch >= args.start_aux:
-        if epoch % args.eval_interval == 0:
-            ### calculate cluster results
-            labels1 = tools.calculate_cluster_labels(X12)
-            labels2 = tools.calculate_cluster_labels(X4)
-        ### calculate cluster centroids
-        centroids1 = tools.calculate_cluster_centroids(X12, labels1)
-        centroids2 = tools.calculate_cluster_centroids(X4, labels2)
-        ### calculate cluster loss
-        M = torch.cdist(centroids1, centroids2)
-        P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
-        h_loss = (M * P).sum()
-        # h_loss = nn.CrossEntropyLoss()(centroids1, centroids2)   # not applicable, since number of cluster classes might be different
+    # if epoch >= args.start_aux:
+    #     if epoch % args.eval_interval == 0:
+    #         ### calculate cluster results
+    #         labels1 = tools.calculate_cluster_labels(X12)
+    #         labels2 = tools.calculate_cluster_labels(X4)
+    #     ### calculate cluster centroids
+    #     centroids1 = tools.calculate_cluster_centroids(X12, labels1)
+    #     centroids2 = tools.calculate_cluster_centroids(X4, labels2)
+    #     ### calculate cluster loss
+    #     M = torch.cdist(centroids1, centroids2)
+    #     P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
+    #     h_loss = (M * P).sum()
     
     w_h = 0 if epoch < args.start_aux else args.aux_weight
     omics_loss = SamplesLoss()(GEX, ADT)
-    cells_loss = SamplesLoss()(X12, X4)
-    loss = 0.5 * 0.001 * omics_loss + 0.5 * cells_loss + w_h * h_loss
+    # cells_loss = SamplesLoss()(X12, X4)
+    # loss = 0.5 * 0.001 * omics_loss + 0.5 * cells_loss + w_h * h_loss
+    loss = omics_loss
     print(f"{epoch}: omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
+    # wandb.log({"Iteration": epoch + 1, "loss": loss})
 
     optimizer.zero_grad()
     loss.backward()

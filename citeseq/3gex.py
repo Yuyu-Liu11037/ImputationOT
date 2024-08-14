@@ -44,8 +44,8 @@ if args.use_wandb is True:
     wandb.init(
         project="ot",
         group="citeseq-3gex", 
-        job_type="main",
-        name="SamplesLoss",
+        job_type="ablation",
+        name="SamplesLoss-omics",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": args.epochs,
@@ -106,6 +106,8 @@ optimizer = optim.Adam([imps], 1.0)
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 h_loss = torch.zeros(1).to(device)
+omics_loss = torch.zeros(1).to(device)
+cells_loss = torch.zeros(1).to(device)
 
 print("Start optimizing")
 for epoch in range(args.epochs):
@@ -119,10 +121,10 @@ for epoch in range(args.epochs):
         print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
-    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
-    indices2 = torch.randperm(SITE3_CELL, device=device)[:args.batch_size]
-    X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
-    X3  = X_imputed[-SITE3_CELL:][indices2]
+    # indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
+    # indices2 = torch.randperm(SITE3_CELL, device=device)[:args.batch_size]
+    # X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
+    # X3  = X_imputed[-SITE3_CELL:][indices2]
     GEX = torch.transpose(X_imputed[:, :FILLED_GEX], 0, 1)
     ADT = torch.transpose(X_imputed[:, FILLED_GEX:], 0, 1)
 
@@ -142,8 +144,9 @@ for epoch in range(args.epochs):
     
     w_h = 0 if epoch < args.start_aux else args.aux_weight
     omics_loss = SamplesLoss()(GEX, ADT)
-    cells_loss = SamplesLoss()(X12, X3)
-    loss = 0.5 * 0.001 * omics_loss + 0.5 * cells_loss + w_h * h_loss
+    # cells_loss = SamplesLoss()(X12, X3)
+    # loss = 0.5 * 0.001 * omics_loss + 0.5 * cells_loss + w_h * h_loss
+    loss = omics_loss
     print(f"{epoch}: omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
     optimizer.zero_grad()
