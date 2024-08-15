@@ -1,9 +1,6 @@
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
-import ot
 import anndata as ad
 import scanpy as sc
 import wandb
@@ -12,7 +9,6 @@ import random
 import argparse
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 from utils import tools
 
@@ -121,26 +117,26 @@ for epoch in range(args.epochs):
         print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
-    # indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
-    # indices2 = torch.randperm(SITE3_CELL, device=device)[:args.batch_size]
-    # X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
-    # X3  = X_imputed[-SITE3_CELL:][indices2]
+    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
+    indices2 = torch.randperm(SITE3_CELL, device=device)[:args.batch_size]
+    X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
+    X3  = X_imputed[-SITE3_CELL:][indices2]
     GEX = torch.transpose(X_imputed[:, :FILLED_GEX], 0, 1)
     ADT = torch.transpose(X_imputed[:, FILLED_GEX:], 0, 1)
 
-    # if epoch >= args.start_aux:
-    #     if epoch % args.eval_interval == 0:
-    #         ### calculate cluster results
-    #         labels1 = tools.calculate_cluster_labels(X12)
-    #         labels2 = tools.calculate_cluster_labels(X3)
-    #     ### calculate cluster centroids
-    #     centroids1 = tools.calculate_cluster_centroids(X12, labels1)
-    #     centroids2 = tools.calculate_cluster_centroids(X3, labels2)
-    #     ### calculate cluster loss
-    #     M = torch.cdist(centroids1, centroids2)
-    #     P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
-    #     h_loss = (M * P).sum()
-    #     # h_loss = nn.CrossEntropyLoss()(centroids1, centroids2)
+    if epoch >= args.start_aux:
+        if epoch % args.eval_interval == 0:
+            ### calculate cluster results
+            labels1 = tools.calculate_cluster_labels(X12)
+            labels2 = tools.calculate_cluster_labels(X3)
+        ### calculate cluster centroids
+        centroids1 = tools.calculate_cluster_centroids(X12, labels1)
+        centroids2 = tools.calculate_cluster_centroids(X3, labels2)
+        ### calculate cluster loss
+        M = torch.cdist(centroids1, centroids2)
+        P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
+        h_loss = (M * P).sum()
+        # h_loss = nn.CrossEntropyLoss()(centroids1, centroids2)
     
     w_h = 0 if epoch < args.start_aux else args.aux_weight
     omics_loss = SamplesLoss()(GEX, ADT)

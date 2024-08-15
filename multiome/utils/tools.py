@@ -51,3 +51,4 @@ def calculate_cluster_centroids(X, cluster_labels):
         centroids.append(cluster_centroid)
     centroids = torch.stack(centroids)
     return centroids
+
