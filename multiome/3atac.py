@@ -44,8 +44,8 @@ if args.use_wandb is True:
     wandb.init(
         project="ot",
         group="multiome-3atac", 
-        job_type="main",
-        name="SamplesLoss",
+        job_type="ablation",
+        name="SamplesLoss-sites",
         config={
             "dataset": "NIPS2021-Multiome",
             "epochs": args.epochs,

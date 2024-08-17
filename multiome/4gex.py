@@ -111,6 +111,8 @@ optimizer = optim.Adam([imps], 1.0)
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 h_loss = torch.zeros(1).to(device)
+omics_loss = torch.zeros(1).to(device)
+cells_loss = torch.zeros(1).to(device)
 
 print("Start optimizing")
 for epoch in range(args.epochs):
