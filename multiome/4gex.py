@@ -24,6 +24,10 @@ parser.add_argument("--eval_interval", type=int, default=100)
 parser.add_argument("--start_aux", type=int, default=400)
 parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
+
+parser.add_argument("--wandb_group", type=str, default="multiome-4gex")
+parser.add_argument("--wandb_job", type=str, choices=["main", "ablation", "aux"], default="main")
+parser.add_argument("--wandb_name", type=str, default="exp")
 args = parser.parse_args()
 
 random.seed(args.seed)
@@ -42,9 +46,9 @@ SITE4_CELL = 22224
 if args.use_wandb is True:
     wandb.init(
         project="ot",
-        group="multiome-4gex", 
-        job_type="main",
-        name="SamplesLoss",
+        group=args.wandb_group,
+        job_type=args.wandb_job,
+        name=args.wandb_name,
         config={
             "dataset": "NIPS2021-Multiome",
             "epochs": args.epochs,
@@ -100,14 +104,14 @@ imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
 def lr_lambda(epoch):
-    if epoch < 300:
+    if epoch < 100:
         return 0.1
-    elif 300 <= epoch < 1000:
-        return 0.101 - (epoch - 300) / 7000.0
+    elif 100 <= epoch < 2000:
+        return 0.101 - (epoch - 100) / 19000.0
     else:
         return 0.001
 
-optimizer = optim.Adam([imps], 1.0)
+optimizer = optim.Adam([imps], 4.0)
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 h_loss = torch.zeros(1).to(device)
