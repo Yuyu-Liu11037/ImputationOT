@@ -3,10 +3,28 @@ import anndata as ad
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
+def cluster_with_kmeans(adata, n_clusters=10, use_pca=True, n_pcs=50):
+    data = adata.X
 
-def clustering(adata, resolution_values=[0.10, 0.15, 0.20, 0.25]):
+    if use_pca:
+        sc.tl.pca(adata, n_comps=n_pcs)
+        data = adata.obsm['X_pca']
+
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
+    true_labels = adata.obs["cell_type"]
+    predicted_labels = kmeans.fit_predict(data).astype(str)
+    
+    ari = adjusted_rand_score(true_labels, predicted_labels)
+    nmi = normalized_mutual_info_score(true_labels, predicted_labels)
+
+    return ari, nmi
+
+
+def cluster_with_leiden(adata, resolution_values=[0.10, 0.15, 0.20, 0.25]):
     sc.pp.pca(adata)
     sc.pp.neighbors(adata, use_rep="X_pca")
     true_labels = adata.obs["cell_type"]
@@ -51,4 +69,3 @@ def calculate_cluster_centroids(X, cluster_labels):
         centroids.append(cluster_centroid)
     centroids = torch.stack(centroids)
     return centroids
-

@@ -19,8 +19,8 @@ from utils import tools
 parser = argparse.ArgumentParser()
 parser.add_argument("--use_wandb", action="store_true", default=False)
 parser.add_argument("--aux_weight", type=float, default=1.0)
-parser.add_argument("--epochs", type=int, default=2000)
-parser.add_argument("--eval_interval", type=int, default=100)
+parser.add_argument("--epochs", type=int, default=1000)
+parser.add_argument("--eval_interval", type=int, default=25)
 parser.add_argument("--start_aux", type=int, default=400)
 parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
@@ -104,14 +104,16 @@ imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
 def lr_lambda(epoch):
-    if epoch < 100:
-        return 0.1
-    elif 100 <= epoch < 2000:
-        return 0.101 - (epoch - 100) / 19000.0
+    if epoch < 20:
+        return 1.0
+    elif 20 <= epoch < 100:
+        return 1.1 - (epoch - 20) / 80.0
+    elif 100 <= epoch < 1000:
+        return 0.101 - (epoch - 100) / 9000.0
     else:
         return 0.001
 
-optimizer = optim.Adam([imps], 4.0)
+optimizer = optim.Adam([imps], 1.0)
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 h_loss = torch.zeros(1).to(device)
@@ -126,7 +128,7 @@ for epoch in range(args.epochs):
     if epoch == 0 and args.use_wandb is True:
         pearson_corr = pearsonr(X_imputed[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy())[0]
         multiome.X = np.vstack((X_imputed[:32469].detach().cpu().numpy(), X3, X_imputed[-22224:].detach().cpu().numpy()))
-        ari, nmi = tools.clustering(multiome, resolution_values=[0.60, 0.65, 0.70, 0.75])
+        ari, nmi = tools.cluster_with_kmeans(multiome, n_clusters=20, use_pca=False)
         print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": 0, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
 
@@ -167,6 +169,6 @@ for epoch in range(args.epochs):
         
         pearson_corr = pearsonr(X_imputed[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy(), ground_truth[-22224:, num_atac:][nonzero_mask42].detach().cpu().numpy())[0]
         multiome.X = np.vstack((X_imputed[:32469].detach().cpu().numpy(), X3, X_imputed[-22224:].detach().cpu().numpy()))
-        ari, nmi = tools.clustering(multiome, resolution_values=[0.60, 0.65, 0.70, 0.75])
+        ari, nmi = tools.cluster_with_leiden(multiome, resolution_values=[0.15, 0.20, 0.25])
         print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})

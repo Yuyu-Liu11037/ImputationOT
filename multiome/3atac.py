@@ -112,6 +112,8 @@ optimizer = optim.Adam([imps], 1.0)
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 h_loss = torch.zeros(1).to(device)
+cells_loss = torch.zeros(1).to(device)
+omics_loss = torch.zeros(1).to(device)
 
 print("Start optimizing")
 for epoch in range(args.epochs):
@@ -134,8 +136,8 @@ for epoch in range(args.epochs):
     indices2 = torch.randperm(SITE3_CELL, device=device)[:args.batch_size]
     X12 = X_imputed[:SITE1_CELL + SITE2_CELL, :][indices1]
     X3  = X_imputed[-SITE3_CELL:, :][indices2]
-    ATAC = torch.transpose(X_imputed[:, :num_atac], 0, 1)
-    GEX = torch.transpose(X_imputed[:, num_atac:], 0, 1)
+    # ATAC = torch.transpose(X_imputed[:, :num_atac], 0, 1)
+    # GEX = torch.transpose(X_imputed[:, num_atac:], 0, 1)
     
     # if epoch >= args.start_aux:
     #     if epoch % args.eval_interval == 0:
@@ -150,10 +152,10 @@ for epoch in range(args.epochs):
     #     P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
     #     h_loss = (M * P).sum()
     
-    w_h = 0 if epoch < args.start_aux else args.aux_weight
-    omics_loss = SamplesLoss()(GEX, ATAC)
+    # w_h = 0 if epoch < args.start_aux else args.aux_weight
+    # omics_loss = SamplesLoss()(GEX, ATAC)
     cells_loss = SamplesLoss()(X12, X3)
-    loss = 0.5 * 0.1 * omics_loss + 0.5 * cells_loss + w_h * h_loss
+    loss = cells_loss
     print(f"{epoch}: omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
     optimizer.zero_grad()
