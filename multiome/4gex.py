@@ -87,8 +87,8 @@ print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
 X = multiome.layers['counts'].toarray()
-X = torch.tensor(X).to(device)
 X12 = X[:SITE1 + SITE2]
+X = torch.tensor(X).to(device)
 X = X[SITE1 + SITE2:]   # Matrix is too large. Remove certain rows to save memory.
 ground_truth = X.clone()
 
@@ -136,8 +136,8 @@ for epoch in range(args.epochs):
     indices2 = torch.randperm(SITE4, device=device)[:args.batch_size]
     X3 = X_imputed[:SITE3][indices1]
     X4  = X_imputed[-SITE4:][indices2]
-    ATAC = torch.transpose(X_imputed[:, :num_atac], 0, 1)
-    GEX  = torch.transpose(X_imputed[:, num_atac:], 0, 1)
+    # ATAC = torch.transpose(X_imputed[:, :num_atac], 0, 1)
+    # GEX  = torch.transpose(X_imputed[:, num_atac:], 0, 1)
 
     # if epoch >= args.start_aux:
     #     if epoch % args.eval_interval == 0:
@@ -153,9 +153,10 @@ for epoch in range(args.epochs):
     #     h_loss = (M * P).sum()
     
     w_h = 0 if epoch < args.start_aux else args.aux_weight
-    omics_loss = SamplesLoss()(GEX, ATAC)
+    # omics_loss = SamplesLoss()(GEX, ATAC)
     cells_loss = SamplesLoss()(X3, X4)
-    loss = 0.5 * 0.01 * omics_loss + 0.5 * 0.1 * cells_loss + w_h * h_loss
+    # loss = 0.5 * 0.1 * omics_loss + 0.5 * 0.1 * cells_loss + w_h * h_loss
+    loss = cells_loss
     print(f"{epoch}: omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
     optimizer.zero_grad()
