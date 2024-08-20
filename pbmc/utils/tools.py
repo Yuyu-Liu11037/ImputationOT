@@ -7,6 +7,14 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
+
+random_seed = 2024
+np.random.seed(random_seed)
+torch.manual_seed(random_seed)
+sc.settings.seed = random_seed
+torch.cuda.manual_seed(random_seed)
+
+    
 def cluster_with_kmeans(adata, n_clusters=10, use_pca=True, n_pcs=50):
     data = adata.X
 
@@ -33,7 +41,6 @@ def cluster_with_leiden(adata, resolution_values=[0.10, 0.20, 0.30, 0.40]):
     for resolution in resolution_values:
         sc.tl.leiden(adata, resolution=resolution, flavor="igraph", n_iterations=2)
         predicted_labels = adata.obs["leiden"]
-        print(predicted_labels)
     
         ari = adjusted_rand_score(true_labels, predicted_labels)
         nmi = normalized_mutual_info_score(true_labels, predicted_labels)

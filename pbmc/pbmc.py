@@ -21,7 +21,7 @@ parser.add_argument("--use_wandb", action="store_true", default=False)
 parser.add_argument("--aux_weight", type=float, default=0)
 parser.add_argument("--epochs", type=int, default=150)
 parser.add_argument("--eval_interval", type=int, default=5)
-parser.add_argument("--start_aux", type=int, default=25)
+parser.add_argument("--start_aux", type=int, default=20)
 parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
 
@@ -137,17 +137,14 @@ for epoch in range(args.epochs):
     X2 = X_imputed[indices2]
 
     if epoch >= args.start_aux:
-        if epoch % args.eval_interval == 0:
-            ### calculate cluster results
-            labels1 = tools.calculate_cluster_labels(X1, resolution=0.9)
-            labels2 = tools.calculate_cluster_labels(X2, resolution=0.9)
+        ### calculate cluster results
+        labels1 = tools.calculate_cluster_labels(X1, resolution=0.9)
+        labels2 = tools.calculate_cluster_labels(X2, resolution=0.9)
         ### calculate cluster centroids
         centroids1 = tools.calculate_cluster_centroids(X1, labels1)
         centroids2 = tools.calculate_cluster_centroids(X2, labels2)
         ### calculate cluster loss
-        M = torch.cdist(centroids1, centroids2)
-        P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
-        h_loss = (M * P).sum()
+        h_loss = SamplesLoss()(centroids1, centroids2)
     
     w_h = 0 if epoch < args.start_aux else args.aux_weight
     cells_loss = SamplesLoss()(X1, X2)
