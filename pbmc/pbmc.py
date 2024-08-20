@@ -18,15 +18,15 @@ from utils import tools
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--use_wandb", action="store_true", default=False)
-parser.add_argument("--aux_weight", type=float, default=1.0)
-parser.add_argument("--epochs", type=int, default=1000)
-parser.add_argument("--eval_interval", type=int, default=25)
-parser.add_argument("--start_aux", type=int, default=400)
+parser.add_argument("--aux_weight", type=float, default=0)
+parser.add_argument("--epochs", type=int, default=150)
+parser.add_argument("--eval_interval", type=int, default=5)
+parser.add_argument("--start_aux", type=int, default=25)
 parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
 
-parser.add_argument("--source_batches", type=str, default="1,2", help="Impute batch size range from 1 to 9")
-parser.add_argument("--target_batch", type=int, default=3, help="Batch number to impute")
+parser.add_argument("--source_batches", type=str, default="1,3", help="Impute batch size range from 1 to 9")
+parser.add_argument("--target_batch", type=int, default=2, help="Batch number to impute")
 
 parser.add_argument("--wandb_group", type=str, default="pbmc")
 parser.add_argument("--wandb_job", type=str, choices=["main", "ablation", "aux"], default="main")
@@ -120,7 +120,7 @@ for epoch in range(args.epochs):
         X_full = []
         for i in range(1, len(batch_sizes) + 1):
             if i in source_batches:
-                tmp = X_source[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
+                tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
             elif i == target_batch:
                 tmp = X_imputed.detach().cpu().numpy()
             else:
@@ -135,10 +135,23 @@ for epoch in range(args.epochs):
     indices2 = torch.randperm(X_target.shape[0], device=device)[:args.batch_size]
     X1 = X_source[indices1]
     X2 = X_imputed[indices2]
+
+    if epoch >= args.start_aux:
+        if epoch % args.eval_interval == 0:
+            ### calculate cluster results
+            labels1 = tools.calculate_cluster_labels(X1, resolution=0.9)
+            labels2 = tools.calculate_cluster_labels(X2, resolution=0.9)
+        ### calculate cluster centroids
+        centroids1 = tools.calculate_cluster_centroids(X1, labels1)
+        centroids2 = tools.calculate_cluster_centroids(X2, labels2)
+        ### calculate cluster loss
+        M = torch.cdist(centroids1, centroids2)
+        P = tools.gumbel_sinkhorn(M, tau=1, n_iter=5)
+        h_loss = (M * P).sum()
     
     w_h = 0 if epoch < args.start_aux else args.aux_weight
     cells_loss = SamplesLoss()(X1, X2)
-    loss = cells_loss
+    loss = cells_loss + w_h * h_loss
     print(f"{epoch}: cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
     optimizer.zero_grad()
@@ -153,13 +166,13 @@ for epoch in range(args.epochs):
         X_full = []
         for i in range(1, len(batch_sizes) + 1):
             if i in source_batches:
-                tmp = X_source[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
+                tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
             elif i == target_batch:
                 tmp = X_imputed.detach().cpu().numpy()
             else:
                 tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
             X_full.append(tmp)
         pbmc.X = np.vstack(X_full)
-        ari, nmi = tools.cluster_with_leiden(pbmc, resolution_values=[0.50, 0.60, 0.70, 0.80])
+        ari, nmi = tools.cluster_with_leiden(pbmc, resolution_values=[0.85, 0.90])
         print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
