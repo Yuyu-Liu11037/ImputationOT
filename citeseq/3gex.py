@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 import anndata as ad
 import scanpy as sc
 import wandb
@@ -41,7 +42,7 @@ if args.use_wandb is True:
         project="ot",
         group="citeseq-3gex", 
         job_type="aux",
-        name="SamplesLoss-cells-h3",
+        name="SamplesLoss-cells-h",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": args.epochs,
@@ -90,16 +91,16 @@ imps = mean_values.repeat(SITE3_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-def lr_lambda(epoch):
-    if epoch < 10:
-        return 0.1
-    elif 10 <= epoch < 50:
-        return 0.101 - (epoch - 10) / 400.0
-    else:
-        return 0.001
+# def lr_lambda(epoch):
+#     if epoch < 10:
+#         return 0.1
+#     elif 10 <= epoch < 50:
+#         return 0.101 - (epoch - 10) / 400.0
+#     else:
+#         return 0.001
 
-optimizer = optim.Adam([imps], 10.0)
-scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+optimizer = optim.Adam([imps], 0.1)
+# scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 h_loss = torch.zeros(1).to(device)
 omics_loss = torch.zeros(1).to(device)
@@ -111,18 +112,23 @@ for epoch in range(args.epochs):
     X_imputed[mask] = imps
 
     if epoch == 0 and args.use_wandb is True:
+        ### pearson
         pearson_corr = pearsonr(X_imputed[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy(), ground_truth[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy())[0]
+        ### mse
+        mse = F.mse_loss(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu(), ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu())
+        ### cmd
+        cmd = tools.correlation_matrix_distance(tools.correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), tools.correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
+        ### ari & nmi
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi = tools.clustering(citeseq)
-        print(f"Initial pearson: {pearson_corr:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
-        wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+        
+        print(f"Iteration {epoch + 1}/{args.epochs}: pearson: {pearson_corr:.4f}, mse: {mse:.4f}, cmd: {cmd:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
+        wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "mse": mse, "cmd": cmd, "ari": ari, "nmi": nmi})
 
     indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
     indices2 = torch.randperm(SITE3_CELL, device=device)[:args.batch_size]
     X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
     X3  = X_imputed[-SITE3_CELL:][indices2]
-    # GEX = torch.transpose(X_imputed[:, :FILLED_GEX], 0, 1)
-    # ADT = torch.transpose(X_imputed[:, FILLED_GEX:], 0, 1)
 
     if epoch >= args.start_aux:
         labels1 = tools.calculate_cluster_labels(X12)
@@ -153,10 +159,10 @@ for epoch in range(args.epochs):
         ### mse
         mse = F.mse_loss(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu(), ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu())
         ### cmd
-        cmd = tools.correlation_matrix_distance(correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
+        cmd = tools.correlation_matrix_distance(tools.correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), tools.correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
         ### ari & nmi
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi = tools.clustering(citeseq)
         
         print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, mse: {mse:.4f}, cmd: {cmd:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
-        wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "ari": ari, "nmi": nmi})
+        wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "mse": mse, "cmd": cmd, "ari": ari, "nmi": nmi})
