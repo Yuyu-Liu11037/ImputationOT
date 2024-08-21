@@ -1,4 +1,5 @@
 import scanpy as sc
+import numpy as np
 import anndata as ad
 import torch
 import torch.nn as nn
@@ -6,7 +7,30 @@ import torch.nn.functional as F
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 
-def clustering(adata, resolution_values=[0.10, 0.15, 0.20, 0.25]):
+random_seed = 2024
+np.random.seed(random_seed)
+torch.manual_seed(random_seed)
+sc.settings.seed = random_seed
+torch.cuda.manual_seed(random_seed)
+
+
+def correlation_matrix(X):
+    X_centered = X - X.mean(dim=0, keepdim=True)
+    cov_matrix = X_centered.t() @ X_centered
+    variance = cov_matrix.diag().unsqueeze(1)
+    correlation = cov_matrix / torch.sqrt(variance @ variance.t())
+    return correlation
+    
+
+def correlation_matrix_distance(X1, X2):
+    corr1 = correlation_matrix(X1)
+    corr2 = correlation_matrix(X2)
+    
+    distance = torch.norm(corr1 - corr2, p='fro')
+    return distance
+
+
+def clustering(adata, resolution_values=[0.15, 0.20, 0.25]):
     sc.pp.pca(adata)
     sc.pp.neighbors(adata, use_rep="X_pca")
     true_labels = adata.obs["cell_type"]
