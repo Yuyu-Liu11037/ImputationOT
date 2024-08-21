@@ -25,7 +25,7 @@ parser.add_argument("--start_aux", type=int, default=20)
 parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
 
-parser.add_argument("--source_batches", type=str, default="1,3", help="Impute batch size range from 1 to 9")
+parser.add_argument("--source_batches", type=str, default="1", help="Impute batch size range from 1 to 9")
 parser.add_argument("--target_batch", type=int, default=2, help="Batch number to impute")
 
 parser.add_argument("--wandb_group", type=str, default="pbmc")
@@ -95,6 +95,7 @@ imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 imps = imps.view(X_target.shape).detach().requires_grad_()
 
+### best performance
 def lr_lambda(epoch):
     if epoch < 20:
         return 1.0
@@ -149,7 +150,8 @@ for epoch in range(args.epochs):
     w_h = 0 if epoch < args.start_aux else args.aux_weight
     cells_loss = SamplesLoss()(X1, X2)
     loss = cells_loss + w_h * h_loss
-    print(f"{epoch}: cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
+    lr = lr_lambda(epoch)
+    print(f"{epoch}: lr = {lr:.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
     optimizer.zero_grad()
     loss.backward()
