@@ -32,7 +32,7 @@ parser.add_argument("--resolution_values", type=str_to_float_list, default=[0.01
 parser.add_argument("--source_batches", type=str, default="1", help="Impute batch range from 1 to 3")
 parser.add_argument("--target_batch", type=int, default=2, help="Batch number to impute")
 
-parser.add_argument("--wandb_group", type=str, default="hlca")
+parser.add_argument("--wandb_group", type=str, default="hmp")
 parser.add_argument("--wandb_job", type=str, choices=["main", "ablation", "aux"], default="main")
 parser.add_argument("--wandb_name", type=str, default="1-2")
 args = parser.parse_args()
@@ -59,28 +59,28 @@ if args.use_wandb is True:
         job_type=args.wandb_job,
         name=args.wandb_name,
         config={
-            "dataset": "hlca",
+            "dataset": "hmp",
             "epochs": args.epochs,
             "h_loss weight": args.aux_weight
         }
     )
 
-hlca = ad.read_h5ad("/workspace/ImputationOT/data/facs_normal_lung_blood_scanpy.20200205.RC4.h5ad") 
-hlca.var_names_make_unique()
+hmp = ad.read_h5ad("/workspace/ImputationOT/data/hmp.h5ad") 
+hmp.var_names_make_unique()
 
 #####################################################################################################################################
 print("Start preprocessing")
 ### preprocess
 ### step 1: normalize
-sc.pp.normalize_total(hlca, target_sum=1e4)
+sc.pp.normalize_total(hmp, target_sum=1e4)
 ### step 2: log transform
-sc.pp.log1p(hlca)
+sc.pp.log1p(hmp)
 ### step 3: select highly variable features
-sc.pp.highly_variable_genes(hlca, subset=True)
+sc.pp.highly_variable_genes(hmp, subset=True)
 print(f"Finish preprocessing\n")
 #####################################################################################################################################
 
-X = hlca.X
+X = hmp.X
 X = torch.tensor(X).to(device)
 X_source = torch.cat([X[batch_sizes_cumsum[i - 1]:batch_sizes_cumsum[i]] for i in source_batches], dim=0)
 X_target = X[batch_sizes_cumsum[target_batch - 1]:batch_sizes_cumsum[target_batch]]
@@ -101,9 +101,9 @@ imps = imps.view(X_target.shape).detach().requires_grad_()
 ### best performance
 def lr_lambda(epoch):
     if epoch < 10:
-        return 0.1
+        return 1.0
     elif 10 <= epoch < 50:
-        return 0.101 - (epoch - 10) / 400.0
+        return 1.001 - (epoch - 10) / 40.0
     else:
         return 0.001
 
@@ -129,8 +129,8 @@ for epoch in range(args.epochs):
             else:
                 tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
             X_full.append(tmp)
-        hlca.X = np.vstack(X_full)
-        ari, nmi, purity, jaccard = tools.cluster_with_leiden(hlca, resolution_values=args.resolution_values)
+        hmp.X = np.vstack(X_full)
+        ari, nmi, purity, jaccard = tools.cluster_with_leiden(hmp, resolution_values=args.resolution_values)
         print(f"Initial pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
         wandb.log({"Iteration": 0, "loss": 0, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity, "jaccard": jaccard})
 
@@ -174,7 +174,7 @@ for epoch in range(args.epochs):
             else:
                 tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
             X_full.append(tmp)
-        hlca.X = np.vstack(X_full)
-        ari, nmi, purity, jaccard = tools.cluster_with_leiden(hlca, resolution_values=args.resolution_values)
+        hmp.X = np.vstack(X_full)
+        ari, nmi, purity, jaccard = tools.cluster_with_leiden(hmp, resolution_values=args.resolution_values)
         print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity, "jaccard": jaccard})
