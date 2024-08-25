@@ -64,7 +64,7 @@ def cluster_with_leiden(adata, resolution_values=[0.10, 0.20, 0.30, 0.40]):
         nmi = normalized_mutual_info_score(true_labels, predicted_labels)
         purity = purity_score(true_labels, predicted_labels)
         jaccard = jaccard_score(true_labels, predicted_labels, average='macro')
-        length = len(adata.obs["leiden"])
+        length = adata.obs["leiden"].nunique()
         print(f"{resolution}, {length}, {ari:.4f}, {nmi:.4f}, {purity:.4f}")
         best_ari = max(best_ari, ari)
         best_nmi = max(best_nmi, nmi)
