@@ -27,14 +27,14 @@ parser.add_argument("--eval_interval", type=int, default=5)
 parser.add_argument("--start_aux", type=int, default=20)
 parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
-parser.add_argument("--resolution_values", type=str_to_float_list, default=[0.01, 0.05])
+parser.add_argument("--resolution_values", type=str_to_float_list, default=[0.05, 0.1, 2, 5, 10])
 
 parser.add_argument("--source_batches", type=str, default="1", help="Impute batch range from 1 to 7")
 parser.add_argument("--target_batch", type=int, default=2, help="Batch number to impute")
 
 parser.add_argument("--wandb_group", type=str, default="simulated")
 parser.add_argument("--wandb_job", type=str, choices=["main", "ablation", "aux"], default="main")
-parser.add_argument("--wandb_name", type=str, default="1-20")
+parser.add_argument("--wandb_name", type=str, default="1-2")
 args = parser.parse_args()
 
 random.seed(args.seed)
@@ -117,7 +117,8 @@ print(f"Start optimizing: use batch(es) {args.source_batches} to impute batch {a
 for epoch in range(args.epochs):
     X_imputed = imps
 
-    if epoch == 0 and args.use_wandb is True:
+    # if epoch == 0 and args.use_wandb is True:
+    if epoch == 0:
         pearson_corr = pearsonr(X_imputed[nonzero_mask_target].detach().cpu().numpy(), ground_truth[nonzero_mask_target].detach().cpu().numpy())[0]
         mae, rmse = tools.calculate_mae_rmse(X_imputed, ground_truth, nonzero_mask_target)
         X_full = []
