@@ -33,7 +33,7 @@ parser.add_argument("--source_batches", type=str, default="1", help="Impute batc
 parser.add_argument("--target_batch", type=int, default=2, help="Batch number to impute")
 parser.add_argument("--target_type", type=int, default=1, help="Data type to impute")
 
-parser.add_argument("--wandb_group", type=str, default="pbmc-3p")
+parser.add_argument("--wandb_group", type=str, default="pbmc-3p-rna")
 parser.add_argument("--wandb_job", type=str, choices=["main", "ablation", "aux"], default="main")
 parser.add_argument("--wandb_name", type=str, default="exp")
 args = parser.parse_args()
@@ -93,6 +93,7 @@ sc.pp.log1p(adata_RNA)
 sc.pp.log1p(adata_ADT)
 ### step 3: select highly variable features
 sc.pp.highly_variable_genes(adata_RNA, subset=True)
+num_rna = adata_RNA.X.shape[1]
 pbmc = ad.concat([adata_RNA, adata_ADT], axis=1, merge="first")
 print(f"Finish preprocessing\n")
 #####################################################################################################################################
@@ -101,27 +102,25 @@ X = pbmc.X.toarray()
 X = torch.tensor(X).to(device)
 X_source = torch.cat([X[batch_sizes_cumsum[i - 1]:batch_sizes_cumsum[i]] for i in source_batches], dim=0)
 X_target = X[batch_sizes_cumsum[target_batch - 1]:batch_sizes_cumsum[target_batch]]
-X_del = torch.cat([X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]] for i in remaining_batches], dim=0) 
-
 ground_truth = X_target.clone()
 
 mask = torch.zeros(X_target.shape, dtype=torch.bool).to(device)
-nonzero_mask_source = (X_source != 0).to(device)
-nonzero_mask_target = (X_target != 0).to(device) 
+mask[:, :num_rna] = True   # mask RNA
+nonzero_mask_source = (X_source[:, :num_rna] != 0).to(device)
+nonzero_mask_target = (X_target[:, :num_rna] != 0).to(device) 
 
 epsilon = 1e-8
-mean_values = torch.sum(X_source * nonzero_mask_source, dim=0) / (torch.sum(nonzero_mask_source, dim=0) + epsilon)
+mean_values = torch.sum(X_source[:, :num_rna] * nonzero_mask_source, dim=0) / (torch.sum(nonzero_mask_source, dim=0) + epsilon)
 imps = mean_values.repeat(X_target.shape[0]).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
-imps = imps.view(X_target.shape).detach().requires_grad_()
+# imps = imps.view(X_target[:, :num_rna].shape).detach().requires_grad_()
 
-### best performance
 def lr_lambda(epoch):
     if epoch < 10:
-        return 1.0
+        return 0.1
     elif 10 <= epoch < 50:
-        return 1.001 - (epoch - 10) / 40.0
+        return 0.101 - (epoch - 10) / 400.0
     else:
         return 0.001
 
@@ -133,11 +132,12 @@ cells_loss = torch.zeros(1).to(device)
 
 print(f"Start optimizing: use batch(es) {args.source_batches} to impute batch {args.target_batch}")
 for epoch in range(args.epochs):
-    X_imputed = imps
+    X_imputed = X_target.detach().clone()
+    X_imputed[mask] = imps
 
     if epoch == 0 and args.use_wandb is True:
-        pearson_corr = pearsonr(X_imputed[nonzero_mask_target].detach().cpu().numpy(), ground_truth[nonzero_mask_target].detach().cpu().numpy())[0]
-        mae, rmse = tools.calculate_mae_rmse(X_imputed, ground_truth, nonzero_mask_target)
+        pearson_corr = pearsonr(X_imputed[:, :num_rna][nonzero_mask_target].detach().cpu().numpy(), ground_truth[:, :num_rna][nonzero_mask_target].detach().cpu().numpy())[0]
+        mae, rmse = tools.calculate_mae_rmse(X_imputed[:, :num_rna], ground_truth[:, :num_rna], nonzero_mask_target)
         X_full = []
         for i in range(1, len(batch_sizes) + 1):
             if i in source_batches:
@@ -148,7 +148,7 @@ for epoch in range(args.epochs):
                 tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
             X_full.append(tmp)
         pbmc.X = np.vstack(X_full)
-        ari, nmi, purity, jaccard = tools.cluster_with_kmeans(pbmc, n_clusters=20, use_pca=False)
+        ari, nmi, purity, jaccard = tools.cluster_with_leiden(pbmc, resolution_values=args.resolution_values)
         print(f"Initial pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
         wandb.log({"Iteration": 0, "loss": 0, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity, "jaccard": jaccard})
 
@@ -179,10 +179,11 @@ for epoch in range(args.epochs):
     scheduler.step()
 
     if (epoch + 1) % args.eval_interval == 0 and args.use_wandb is True:
-        X_imputed = imps
+        X_imputed = X_target.detach().clone()
+        X_imputed[mask] = imps
         
-        pearson_corr = pearsonr(X_imputed[nonzero_mask_target].detach().cpu().numpy(), ground_truth[nonzero_mask_target].detach().cpu().numpy())[0]
-        mae, rmse = tools.calculate_mae_rmse(X_imputed, ground_truth, nonzero_mask_target)
+        pearson_corr = pearsonr(X_imputed[:, :num_rna][nonzero_mask_target].detach().cpu().numpy(), ground_truth[:, :num_rna][nonzero_mask_target].detach().cpu().numpy())[0]
+        mae, rmse = tools.calculate_mae_rmse(X_imputed[:, :num_rna], ground_truth[:, :num_rna], nonzero_mask_target)
         X_full = []
         for i in range(1, len(batch_sizes) + 1):
             if i in source_batches:

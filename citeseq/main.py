@@ -29,12 +29,12 @@ parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
 parser.add_argument("--resolution_values", type=str_to_float_list, default=[0.05, 0.1, 2, 5, 10])
 
-parser.add_argument("--source_batches", type=str, default="1", help="Impute batch range from 1 to 7")
-parser.add_argument("--target_batch", type=int, default=2, help="Batch number to impute")
+parser.add_argument("--source_batches", type=str, default="1,2", help="Impute batch range from 1 to 7")
+parser.add_argument("--target_batch", type=int, default=3, help="Batch number to impute")
 
 parser.add_argument("--wandb_group", type=str, default="citeseq")
 parser.add_argument("--wandb_job", type=str, choices=["main", "ablation", "aux"], default="main")
-parser.add_argument("--wandb_name", type=str, default="1-2")
+parser.add_argument("--wandb_name", type=str, default="1,2-3")
 args = parser.parse_args()
 
 random.seed(args.seed)
@@ -45,6 +45,11 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 device = 'cuda:0'
+SITE1_CELL = 16311
+SITE2_CELL = 25171
+SITE3_CELL = 32029
+SITE4_CELL = 16750
+FILLED_GEX = 2000
 batch_sizes = [16311, 25171, 32029, 16750]
 batch_sizes_cumsum = np.cumsum([0] + batch_sizes)
 
@@ -65,7 +70,7 @@ if args.use_wandb is True:
         }
     )
 
-citeseq = ad.read_h5ad("/workspace/ImputationOT/data/sim1_norm.h5ad") 
+citeseq = ad.read_h5ad("/workspace/ImputationOT/data/citeseq_processed.h5ad") 
 citeseq.var_names_make_unique()
 
 #####################################################################################################################################
@@ -92,19 +97,19 @@ X = citeseq.X.toarray()
 X = torch.tensor(X).to(device)
 X_source = torch.cat([X[batch_sizes_cumsum[i - 1]:batch_sizes_cumsum[i]] for i in source_batches], dim=0)
 X_target = X[batch_sizes_cumsum[target_batch - 1]:batch_sizes_cumsum[target_batch]]
-
 ground_truth = X_target.clone()
 
 mask = torch.zeros(X_target.shape, dtype=torch.bool).to(device)
-nonzero_mask_source = (X_source != 0).to(device)
-nonzero_mask_target = (X_target != 0).to(device) 
+mask[:, :FILLED_GEX] = True
+nonzero_mask_target = (X_target[:, :FILLED_GEX] != 0).to(device) 
+nonzero_mask1121 = (X[:SITE1_CELL + SITE2_CELL, :FILLED_GEX] != 0).to(device)   # nonzero data of X(1,1), X(2,1)
+nonzero_mask31 = (X[-SITE3_CELL:, :FILLED_GEX] != 0).to(device)   # nonzero data of X(3,1)
+nonzero_mask32 = (X[-SITE3_CELL:, FILLED_GEX:] != 0).to(device)   # nonzero data of X(3,2)
 
-epsilon = 1e-8
-mean_values = torch.sum(X_source * nonzero_mask_source, dim=0) / (torch.sum(nonzero_mask_source, dim=0) + epsilon)
-imps = mean_values.repeat(X_target.shape[0]).to(device)
+mean_values = torch.sum(X[:SITE1_CELL + SITE2_CELL, :FILLED_GEX], dim=0) / torch.sum(nonzero_mask1121, dim=0)
+imps = mean_values.repeat(SITE3_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
-imps = imps.view(X_target.shape).detach().requires_grad_()
 
 ### best performance
 def lr_lambda(epoch):
@@ -123,12 +128,13 @@ cells_loss = torch.zeros(1).to(device)
 
 print(f"Start optimizing: use batch(es) {args.source_batches} to impute batch {args.target_batch}")
 for epoch in range(args.epochs):
-    X_imputed = imps
+    X_imputed = X_target.detach().clone()
+    X_imputed[mask] = imps
 
     # if epoch == 0 and args.use_wandb is True:
     if epoch == 0:
-        pearson_corr = pearsonr(X_imputed[nonzero_mask_target].detach().cpu().numpy(), ground_truth[nonzero_mask_target].detach().cpu().numpy())[0]
-        mae, rmse = tools.calculate_mae_rmse(X_imputed, ground_truth, nonzero_mask_target)
+        pearson_corr = pearsonr(X_imputed[:, :FILLED_GEX][nonzero_mask_target].detach().cpu().numpy(), ground_truth[:, :FILLED_GEX][nonzero_mask_target].detach().cpu().numpy())[0]
+        mae, rmse = tools.calculate_mae_rmse(X_imputed[:, :FILLED_GEX], ground_truth[:, :FILLED_GEX], nonzero_mask_target)
         X_full = []
         for i in range(1, len(batch_sizes) + 1):
             if i in source_batches:
@@ -143,20 +149,10 @@ for epoch in range(args.epochs):
         print(f"Initial pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
         wandb.log({"Iteration": 0, "loss": 0, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity, "jaccard": jaccard})
 
-    indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
-    indices2 = torch.randperm(SITE4_CELL, device=device)[:args.batch_size]
-    X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
-    X4  = X_imputed[-SITE4_CELL:][indices2]
-
-    # if epoch >= args.start_aux:
-    #     ### calculate cluster results
-    #     labels1 = tools.calculate_cluster_labels(X1, resolution=0.9)
-    #     labels2 = tools.calculate_cluster_labels(X2, resolution=0.9)
-    #     ### calculate cluster centroids
-    #     centroids1 = tools.calculate_cluster_centroids(X1, labels1)
-    #     centroids2 = tools.calculate_cluster_centroids(X2, labels2)
-    #     ### calculate cluster loss
-    #     h_loss = SamplesLoss()(centroids1, centroids2)
+    indices1 = torch.randperm(X_source.shape[0], device=device)[:args.batch_size]
+    indices2 = torch.randperm(X_imputed.shape[0], device=device)[:args.batch_size]
+    X1 = X_source[indices1]
+    X2 = X_imputed[indices2]
     
     w_h = 0 if epoch < args.start_aux else args.aux_weight
     cells_loss = SamplesLoss()(X1, X2)
@@ -169,21 +165,21 @@ for epoch in range(args.epochs):
     optimizer.step()
     scheduler.step()
 
-    if (epoch + 1) % args.eval_interval == 0 and args.use_wandb is True:
-        X_imputed = imps
+    # if (epoch + 1) % args.eval_interval == 0 and args.use_wandb is True:
+    #     X_imputed = imps
         
-        pearson_corr = pearsonr(X_imputed[nonzero_mask_target].detach().cpu().numpy(), ground_truth[nonzero_mask_target].detach().cpu().numpy())[0]
-        mae, rmse = tools.calculate_mae_rmse(X_imputed, ground_truth, nonzero_mask_target)
-        X_full = []
-        for i in range(1, len(batch_sizes) + 1):
-            if i in source_batches:
-                tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
-            elif i == target_batch:
-                tmp = X_imputed.detach().cpu().numpy()
-            else:
-                tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
-            X_full.append(tmp)
-        citeseq.X = np.vstack(X_full)
-        ari, nmi, purity, jaccard = tools.cluster_with_leiden(citeseq, resolution_values=args.resolution_values)
-        print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
-        wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity, "jaccard": jaccard})
+    #     pearson_corr = pearsonr(X_imputed[nonzero_mask_target].detach().cpu().numpy(), ground_truth[nonzero_mask_target].detach().cpu().numpy())[0]
+    #     mae, rmse = tools.calculate_mae_rmse(X_imputed, ground_truth, nonzero_mask_target)
+    #     X_full = []
+    #     for i in range(1, len(batch_sizes) + 1):
+    #         if i in source_batches:
+    #             tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
+    #         elif i == target_batch:
+    #             tmp = X_imputed.detach().cpu().numpy()
+    #         else:
+    #             tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
+    #         X_full.append(tmp)
+    #     citeseq.X = np.vstack(X_full)
+    #     ari, nmi, purity, jaccard = tools.cluster_with_leiden(citeseq, resolution_values=args.resolution_values)
+    #     print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
+    #     wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity, "jaccard": jaccard})
