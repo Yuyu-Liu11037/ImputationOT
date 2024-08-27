@@ -103,9 +103,9 @@ imps = imps.view(X_target.shape).detach().requires_grad_()
 ### best performance
 def lr_lambda(epoch):
     if epoch < 10:
-        return 1.0
+        return 0.1
     elif 10 <= epoch < 50:
-        return 1.001 - (epoch - 10) / 40.0
+        return 0.101 - (epoch - 10) / 400.0
     else:
         return 0.001
 
