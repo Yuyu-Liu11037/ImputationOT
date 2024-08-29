@@ -1,12 +1,10 @@
 import scanpy as sc
+import numpy as np
 import anndata as ad
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from sklearn.cluster import KMeans
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, mean_absolute_error, mean_squared_error, confusion_matrix, jaccard_score
-from math import sqrt
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 
 random_seed = 2024
@@ -16,63 +14,39 @@ sc.settings.seed = random_seed
 torch.cuda.manual_seed(random_seed)
 
 
-def purity_score(y_true, y_pred):
-    contingency_matrix = confusion_matrix(y_true, y_pred)
-    return np.sum(np.amax(contingency_matrix, axis=0)) / np.sum(contingency_matrix)
-
-
-def calculate_mae_rmse(imputed, ground_truth, mask):
-    imputed_values = imputed[mask].detach().cpu().numpy()
-    ground_truth_values = ground_truth[mask].detach().cpu().numpy()
+def correlation_matrix(X):
+    X_centered = X - X.mean(dim=0, keepdim=True)
+    cov_matrix = X_centered.t() @ X_centered
+    variance = cov_matrix.diag().unsqueeze(1)
+    correlation = cov_matrix / torch.sqrt(variance @ variance.t())
+    return correlation
     
-    mae = mean_absolute_error(ground_truth_values, imputed_values)
-    rmse = sqrt(mean_squared_error(ground_truth_values, imputed_values))
+
+def correlation_matrix_distance(X1, X2):
+    corr1 = correlation_matrix(X1)
+    corr2 = correlation_matrix(X2)
     
-    return mae, rmse
-
-    
-def cluster_with_kmeans(adata, n_clusters=10, use_pca=True, n_pcs=50):
-    data = adata.X
-
-    if use_pca:
-        sc.tl.pca(adata, n_comps=n_pcs)
-        data = adata.obsm['X_pca']
-
-    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
-    true_labels = adata.obs["cell_type"]
-    predicted_labels = kmeans.fit_predict(data).astype(str)
-    
-    ari = adjusted_rand_score(true_labels, predicted_labels)
-    nmi = normalized_mutual_info_score(true_labels, predicted_labels)
-    purity = purity_score(true_labels, predicted_labels)
-    jaccard = jaccard_score(true_labels, predicted_labels, average='macro')
-
-    return ari, nmi, purity, jaccard
+    distance = torch.norm(corr1 - corr2, p='fro')
+    return distance
 
 
-def cluster_with_leiden(adata, resolution_values=[0.10, 0.20, 0.30, 0.40]):
+def clustering(adata, resolution_values=[0.15, 0.20, 0.25]):
     sc.pp.pca(adata)
     sc.pp.neighbors(adata, use_rep="X_pca")
     true_labels = adata.obs["cell_type"]
-    best_ari, best_nmi, best_purity, best_jaccard = 0, 0, 0, 0
+    best_ari, best_nmi = 0, 0
 
     for resolution in resolution_values:
+        
         sc.tl.leiden(adata, resolution=resolution, flavor="igraph", n_iterations=2)
         predicted_labels = adata.obs["leiden"]
     
         ari = adjusted_rand_score(true_labels, predicted_labels)
         nmi = normalized_mutual_info_score(true_labels, predicted_labels)
-        purity = purity_score(true_labels, predicted_labels)
-        jaccard = jaccard_score(true_labels, predicted_labels, average='macro')
-        length = adata.obs["leiden"].nunique()
-        print(f"{resolution}, {length}, {ari:.4f}, {nmi:.4f}, {purity:.4f}")
         best_ari = max(best_ari, ari)
         best_nmi = max(best_nmi, nmi)
-        best_purity = max(best_purity, purity)
-        best_jaccard = max(best_jaccard, jaccard)
-    print()
 
-    return best_ari, best_nmi, best_purity, best_jaccard
+    return best_ari, best_nmi
 
 
 def gumbel_sinkhorn(X, tau=1.0, n_iter=20, epsilon=1e-6):
@@ -85,11 +59,11 @@ def gumbel_sinkhorn(X, tau=1.0, n_iter=20, epsilon=1e-6):
     return X
 
 
-def calculate_cluster_labels(X, resolution=0.65):
+def calculate_cluster_labels(X):
     adata = ad.AnnData(X.detach().cpu().numpy())
     sc.pp.pca(adata)
     sc.pp.neighbors(adata, use_rep="X_pca")
-    sc.tl.leiden(adata, resolution=resolution, flavor="igraph", n_iterations=2)
+    sc.tl.leiden(adata, resolution=0.2, flavor="igraph", n_iterations=2)
     predicted_labels = adata.obs["leiden"]
     cluster_labels = torch.tensor(predicted_labels.astype(int).values)
     return cluster_labels

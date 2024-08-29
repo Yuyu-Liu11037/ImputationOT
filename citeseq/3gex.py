@@ -6,12 +6,16 @@ import anndata as ad
 import scanpy as sc
 import wandb
 import sys
+import os
 import random
 import argparse
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from utils import tools
+from weighting.MGDA import MGDA
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--use_wandb", action="store_true", default=False)
@@ -42,7 +46,7 @@ if args.use_wandb is True:
         project="ot",
         group="citeseq-3gex", 
         job_type="aux",
-        name="SamplesLoss-cells-h",
+        name="mgda",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": args.epochs,
@@ -91,20 +95,14 @@ imps = mean_values.repeat(SITE3_CELL).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
-# def lr_lambda(epoch):
-#     if epoch < 10:
-#         return 0.1
-#     elif 10 <= epoch < 50:
-#         return 0.101 - (epoch - 10) / 400.0
-#     else:
-#         return 0.001
-
 optimizer = optim.Adam([imps], 0.1)
-# scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+mgda = MGDA()
+mgda_gn = 'none'
 
 h_loss = torch.zeros(1).to(device)
 omics_loss = torch.zeros(1).to(device)
 cells_loss = torch.zeros(1).to(device)
+lr = 0.1
 
 print("Start optimizing")
 for epoch in range(args.epochs):
@@ -130,7 +128,7 @@ for epoch in range(args.epochs):
     X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
     X3  = X_imputed[-SITE3_CELL:][indices2]
 
-    if epoch >= args.start_aux:
+    if epoch >= 1:
         labels1 = tools.calculate_cluster_labels(X12)
         labels2 = tools.calculate_cluster_labels(X3)
         ### calculate cluster centroids
@@ -139,16 +137,16 @@ for epoch in range(args.epochs):
         ### calculate cluster loss
         h_loss = SamplesLoss()(centroids1, centroids2)
     
-    w_h = 0 if epoch < args.start_aux else args.aux_weight
     cells_loss = SamplesLoss()(X12, X3)
-    loss = cells_loss + w_h * h_loss
-    lr = 0.1
-    print(f"{epoch}: lr = {lr:.4f}, omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
+    losses = [cells_loss, h_loss]
+    sol = mgda.backward(losses, mgda_gn=mgda_gn)
+    print(sol)
+    print(f"{epoch}: lr = {lr}, omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    # scheduler.step()
+    scheduler.step()
 
     if (epoch + 1) % args.eval_interval == 0 and args.use_wandb is True:
         X_imputed = X.detach().clone()
