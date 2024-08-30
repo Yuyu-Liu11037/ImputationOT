@@ -1,19 +1,22 @@
-import torch, sys, random
+import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-
 
 class AbsWeighting(nn.Module):
-    r"""An abstract class for weighting strategies.
-    """
-    def __init__(self):
+    r"""An abstract class for weighting strategies."""
+    def __init__(self, task_num, device):
         super(AbsWeighting, self).__init__()
-        
+        self.task_num = task_num
+        self.device = device
+        self.rep_grad = False  # 这是用于控制是否计算表示层梯度的标志
+
     def init_param(self):
-        r"""Define and initialize some trainable parameters required by specific weighting methods. 
-        """
+        r"""Define and initialize some trainable parameters required by specific weighting methods."""
         pass
+
+    def get_share_params(self):
+        # 这里假设共享参数是 sub_matrix2，它是可调节的
+        shared_params = [param for param in self.parameters() if param.requires_grad]
+        return shared_params
 
     def _compute_grad_dim(self):
         self.grad_index = []
@@ -22,7 +25,7 @@ class AbsWeighting(nn.Module):
         self.grad_dim = sum(self.grad_index)
 
     def _grad2vec(self):
-        grad = torch.zeros(self.grad_dim)
+        grad = torch.zeros(self.grad_dim).to(self.device)
         count = 0
         for param in self.get_share_params():
             if param.grad is not None:
@@ -33,9 +36,6 @@ class AbsWeighting(nn.Module):
         return grad
 
     def _compute_grad(self, losses, mode, rep_grad=False):
-        '''
-        mode: backward, autograd
-        '''
         if not rep_grad:
             grads = torch.zeros(self.task_num, self.grad_dim).to(self.device)
             for tn in range(self.task_num):
@@ -49,15 +49,15 @@ class AbsWeighting(nn.Module):
                     raise ValueError('No support {} mode for gradient computation')
                 self.zero_grad_share_params()
         else:
-            if not isinstance(self.rep, dict):
-                grads = torch.zeros(self.task_num, *self.rep.size()).to(self.device)
-            else:
-                grads = [torch.zeros(*self.rep[task].size()) for task in self.task_name]
-            for tn, task in enumerate(self.task_name):
-                if mode == 'backward':
-                    losses[tn].backward(retain_graph=True) if (tn+1)!=self.task_num else losses[tn].backward()
-                    grads[tn] = self.rep_tasks[task].grad.data.clone()
+            # Add implementation if needed for your case
+            pass
         return grads
+
+    def zero_grad_share_params(self):
+        for param in self.get_share_params():
+            if param.grad is not None:
+                param.grad.detach_()
+                param.grad.zero_()
 
     def _reset_grad(self, new_grads):
         count = 0
@@ -67,60 +67,23 @@ class AbsWeighting(nn.Module):
                 end = sum(self.grad_index[:(count+1)])
                 param.grad.data = new_grads[beg:end].contiguous().view(param.data.size()).data.clone()
             count += 1
-            
+
     def _get_grads(self, losses, mode='backward'):
-        r"""This function is used to return the gradients of representations or shared parameters.
-
-        If ``rep_grad`` is ``True``, it returns a list with two elements. The first element is \
-        the gradients of the representations with the size of [task_num, batch_size, rep_size]. \
-        The second element is the resized gradients with size of [task_num, -1], which means \
-        the gradient of each task is resized as a vector.
-
-        If ``rep_grad`` is ``False``, it returns the gradients of the shared parameters with size \
-        of [task_num, -1], which means the gradient of each task is resized as a vector.
-        """
         if self.rep_grad:
-            per_grads = self._compute_grad(losses, mode, rep_grad=True)
-            if not isinstance(self.rep, dict):
-                grads = per_grads.reshape(self.task_num, self.rep.size()[0], -1).sum(1)
-            else:
-                try:
-                    grads = torch.stack(per_grads).sum(1).view(self.task_num, -1)
-                except:
-                    raise ValueError('The representation dimensions of different tasks must be consistent')
-            return [per_grads, grads]
+            # This branch is for computing gradients of representations
+            pass
         else:
             self._compute_grad_dim()
             grads = self._compute_grad(losses, mode)
             return grads
         
     def _backward_new_grads(self, batch_weight, per_grads=None, grads=None):
-        r"""This function is used to reset the gradients and make a backward.
-
-        Args:
-            batch_weight (torch.Tensor): A tensor with size of [task_num].
-            per_grad (torch.Tensor): It is needed if ``rep_grad`` is True. The gradients of the representations.
-            grads (torch.Tensor): It is needed if ``rep_grad`` is False. The gradients of the shared parameters. 
-        """
         if self.rep_grad:
-            if not isinstance(self.rep, dict):
-                # transformed_grad = torch.einsum('i, i... -> ...', batch_weight, per_grads)
-                transformed_grad = sum([batch_weight[i] * per_grads[i] for i in range(self.task_num)])
-                self.rep.backward(transformed_grad)
-            else:
-                for tn, task in enumerate(self.task_name):
-                    rg = True if (tn+1)!=self.task_num else False
-                    self.rep[task].backward(batch_weight[tn]*per_grads[tn], retain_graph=rg)
+            # This branch is for resetting gradients of representations
+            pass
         else:
-            # new_grads = torch.einsum('i, i... -> ...', batch_weight, grads)
             new_grads = sum([batch_weight[i] * grads[i] for i in range(self.task_num)])
             self._reset_grad(new_grads)
     
-    @property
     def backward(self, losses, **kwargs):
-        r"""
-        Args:
-            losses (list): A list of losses of each task.
-            kwargs (dict): A dictionary of hyperparameters of weighting methods.
-        """
         pass

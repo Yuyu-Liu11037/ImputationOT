@@ -12,7 +12,7 @@ import argparse
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 
-from utils import tools
+from imputationot.utils import correlation_matrix, correlation_matrix_distance, clustering, calculate_cluster_labels, calculate_cluster_centroids
 from imputationot.weighting import MGDA
 
 parser = argparse.ArgumentParser()
@@ -53,7 +53,7 @@ if args.use_wandb is True:
         }
     )
 
-citeseq = ad.read_h5ad("/workspace/ImputationOT/data/citeseq_processed.h5ad")
+citeseq = ad.read_h5ad("/workspace/ImputationOT/imputationot/data/citeseq_processed.h5ad")
 citeseq.var_names_make_unique()
 
 #####################################################################################################################################
@@ -94,7 +94,7 @@ imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
 optimizer = optim.Adam([imps], 0.1)
-mgda = MGDA()
+mgda = MGDA(task_num=2, device=device)
 mgda_gn = 'none'
 
 h_loss = torch.zeros(1).to(device)
@@ -104,6 +104,7 @@ lr = 0.1
 
 print("Start optimizing")
 for epoch in range(args.epochs):
+    optimizer.zero_grad()
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
 
@@ -113,11 +114,11 @@ for epoch in range(args.epochs):
         ### mse
         mse = F.mse_loss(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu(), ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu())
         ### cmd
-        cmd = tools.correlation_matrix_distance(
-            tools.correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), tools.correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
+        cmd = correlation_matrix_distance(
+            correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
         ### ari & nmi
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
-        ari, nmi = tools.clustering(citeseq)
+        ari, nmi = clustering(citeseq)
         
         print(f"Iteration {epoch + 1}/{args.epochs}: pearson: {pearson_corr:.4f}, mse: {mse:.4f}, cmd: {cmd:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch, "loss": 0, "pearson": pearson_corr, "mse": mse, "cmd": cmd, "ari": ari, "nmi": nmi})
@@ -127,25 +128,23 @@ for epoch in range(args.epochs):
     X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
     X3  = X_imputed[-SITE3_CELL:][indices2]
 
-    if epoch >= 1:
-        labels1 = tools.calculate_cluster_labels(X12)
-        labels2 = tools.calculate_cluster_labels(X3)
+    if epoch >= 0:
+        labels1 = calculate_cluster_labels(X12)
+        labels2 = calculate_cluster_labels(X3)
         ### calculate cluster centroids
-        centroids1 = tools.calculate_cluster_centroids(X12, labels1)
-        centroids2 = tools.calculate_cluster_centroids(X3, labels2)
+        centroids1 = calculate_cluster_centroids(X12, labels1)
+        centroids2 = calculate_cluster_centroids(X3, labels2)
         ### calculate cluster loss
         h_loss = SamplesLoss()(centroids1, centroids2)
     
     cells_loss = SamplesLoss()(X12, X3)
     losses = [cells_loss, h_loss]
-    sol = mgda.backward(losses, mgda_gn=mgda_gn)
+    sol = mgda.backward(losses)
     print(sol)
+    loss = sol[0] * cells_loss + sol[1] * h_loss
     print(f"{epoch}: lr = {lr}, omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
-
-    optimizer.zero_grad()
-    loss.backward()
+    
     optimizer.step()
-    scheduler.step()
 
     if (epoch + 1) % args.eval_interval == 0 and args.use_wandb is True:
         X_imputed = X.detach().clone()
@@ -156,11 +155,11 @@ for epoch in range(args.epochs):
         ### mse
         mse = F.mse_loss(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu(), ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu())
         ### cmd
-        cmd = tools.correlation_matrix_distance(
-            tools.correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), tools.correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
+        cmd = correlation_matrix_distance(
+            correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
         ### ari & nmi
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
-        ari, nmi = tools.clustering(citeseq)
+        ari, nmi = clustering(citeseq)
         
         print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, mse: {mse:.4f}, cmd: {cmd:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "mse": mse, "cmd": cmd, "ari": ari, "nmi": nmi})

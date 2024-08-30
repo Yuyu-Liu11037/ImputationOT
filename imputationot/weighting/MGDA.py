@@ -1,25 +1,16 @@
 import torch
-import sys, os
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
 
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-
-from imputationot.weighting import AbsWeighting
+from imputationot.weighting.abstract_weighting import AbsWeighting
 
 
 class MGDA(AbsWeighting):
-    r"""Multiple Gradient Descent Algorithm (MGDA).
-    
-    This method is proposed in `Multi-Task Learning as Multi-Objective Optimization (NeurIPS 2018) <https://papers.nips.cc/paper/2018/hash/432aca3a1e345e339f35a30c8f65edce-Abstract.html>`_ \
-    and implemented by modifying from the `official PyTorch implementation <https://github.com/isl-org/MultiObjectiveOptimization>`_. 
-
-    Args:
-        mgda_gn ({'none', 'l2', 'loss', 'loss+'}, default='none'): The type of gradient normalization.
-
-    """
-    def __init__(self):
-        super(MGDA, self).__init__()
+    r"""Multiple Gradient Descent Algorithm (MGDA)."""
+    def __init__(self, task_num, device, mgda_gn='none'):
+        super(MGDA, self).__init__(task_num, device)
+        self.mgda_gn = mgda_gn
     
     def _find_min_norm_element(self, grads):
 
@@ -107,8 +98,9 @@ class MGDA(AbsWeighting):
                 return sol_vec
             sol_vec = new_sol_vec
             iter_count += 1
+
         return sol_vec
-    
+
     def _gradient_normalizers(self, grads, loss_data, ntype):
         if ntype == 'l2':
             gn = grads.pow(2).sum(-1).sqrt()
@@ -119,20 +111,14 @@ class MGDA(AbsWeighting):
         elif ntype == 'none':
             gn = torch.ones_like(loss_data).to(self.device)
         else:
-            raise ValueError('No support normalization type {} for MGDA'.format(ntype))
+            raise ValueError(f'No support normalization type {ntype} for MGDA')
         grads = grads / gn.unsqueeze(1).repeat(1, grads.size()[1])
         return grads
     
-    def backward(self, losses, **kwargs):
-        mgda_gn = kwargs['mgda_gn']
+    def backward(self, losses):
         grads = self._get_grads(losses, mode='backward')
-        if self.rep_grad:
-            per_grads, grads = grads[0], grads[1]
         loss_data = torch.tensor([loss.item() for loss in losses]).to(self.device)
-        grads = self._gradient_normalizers(grads, loss_data, ntype=mgda_gn) # l2, loss, loss+, none
+        grads = self._gradient_normalizers(grads, loss_data, ntype=self.mgda_gn)  # l2, loss, loss+, none
         sol = self._find_min_norm_element(grads)
-        if self.rep_grad:
-            self._backward_new_grads(sol, per_grads=per_grads)
-        else:
-            self._backward_new_grads(sol, grads=grads)
+        self._backward_new_grads(sol, grads=grads)
         return sol.detach().cpu().numpy()
