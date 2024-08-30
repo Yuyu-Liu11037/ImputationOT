@@ -1,18 +1,13 @@
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
-import ot
 import anndata as ad
 import scanpy as sc
 import wandb
-import sys
 import random
 import argparse
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 from utils import tools
 

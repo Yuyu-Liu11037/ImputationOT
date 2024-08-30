@@ -12,10 +12,8 @@ import argparse
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from utils import tools
-from weighting.MGDA import MGDA
+from imputationot.weighting import MGDA
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--use_wandb", action="store_true", default=False)
@@ -115,7 +113,8 @@ for epoch in range(args.epochs):
         ### mse
         mse = F.mse_loss(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu(), ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu())
         ### cmd
-        cmd = tools.correlation_matrix_distance(tools.correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), tools.correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
+        cmd = tools.correlation_matrix_distance(
+            tools.correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), tools.correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
         ### ari & nmi
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi = tools.clustering(citeseq)
@@ -157,7 +156,8 @@ for epoch in range(args.epochs):
         ### mse
         mse = F.mse_loss(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu(), ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu())
         ### cmd
-        cmd = tools.correlation_matrix_distance(tools.correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), tools.correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
+        cmd = tools.correlation_matrix_distance(
+            tools.correlation_matrix(X_imputed[-SITE3_CELL:, :FILLED_GEX].detach().cpu()), tools.correlation_matrix(ground_truth[-SITE3_CELL:, :FILLED_GEX].detach().cpu()))
         ### ari & nmi
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi = tools.clustering(citeseq)

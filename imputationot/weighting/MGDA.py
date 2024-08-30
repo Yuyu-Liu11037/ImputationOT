@@ -1,14 +1,11 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
 import sys, os
 
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
-from weighting.abstract_weighting import AbsWeighting
+from imputationot.weighting import AbsWeighting
 
 
 class MGDA(AbsWeighting):

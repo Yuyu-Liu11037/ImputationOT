@@ -1,5 +1,5 @@
 .ipynb_checkpoints
 data/
-multiome/log1p_multiome.h5ad
+imputationot/multiome/log1p_multiome.h5ad
 **/*wandb*/
 
