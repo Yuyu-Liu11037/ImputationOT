@@ -3,7 +3,7 @@ import torch.nn as nn
 
 class AbsWeighting(nn.Module):
     r"""An abstract class for weighting strategies."""
-    def __init__(self, task_num, device):
+    def __init__(self, task_num=2, device='cuda:0'):
         super(AbsWeighting, self).__init__()
         self.task_num = task_num
         self.device = device

@@ -13,7 +13,7 @@ from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 
 from imputationot.utils import correlation_matrix, correlation_matrix_distance, clustering, calculate_cluster_labels, calculate_cluster_centroids
-from imputationot.weighting import MGDA
+from imputationot.weighting import MoCo
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--use_wandb", action="store_true", default=False)
@@ -44,7 +44,7 @@ if args.use_wandb is True:
         project="ot",
         group="citeseq-3gex", 
         job_type="aux",
-        name="mgda",
+        name="MoCo",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": args.epochs,
@@ -94,8 +94,8 @@ imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
 optimizer = optim.Adam([imps], 0.1)
-mgda = MGDA(task_num=2, device=device)
-mgda_gn = 'none'
+grad_fn = MoCo()
+grad_fn.init_param()
 
 h_loss = torch.zeros(1).to(device)
 omics_loss = torch.zeros(1).to(device)
@@ -138,8 +138,8 @@ for epoch in range(args.epochs):
         h_loss = SamplesLoss()(centroids1, centroids2)
     
     cells_loss = SamplesLoss()(X12, X3)
-    losses = [cells_loss, h_loss]
-    sol = mgda.backward(losses)
+    losses = torch.stack([cells_loss, h_loss])
+    sol = grad_fn.backward(losses, MoCo_beta=0.5, MoCo_beta_sigma=0.5, MoCo_gamma=0.1, MoCo_gamma_sigma=0.5, MoCo_rho=0)
     print(sol)
     loss = sol[0] * cells_loss + sol[1] * h_loss
     print(f"{epoch}: lr = {lr}, omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
