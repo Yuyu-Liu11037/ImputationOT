@@ -13,7 +13,7 @@ from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 
 from imputationot.utils import correlation_matrix, correlation_matrix_distance, clustering, calculate_cluster_labels, calculate_cluster_centroids
-from imputationot.weighting import MoCo
+from imputationot.weighting import RLW
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--use_wandb", action="store_true", default=False)
@@ -43,8 +43,8 @@ if args.use_wandb is True:
     wandb.init(
         project="ot",
         group="citeseq-3gex", 
-        job_type="aux",
-        name="MoCo",
+        job_type="ablation",
+        name="GEX",
         config={
             "dataset": "NIPS2021-Cite-seq",
             "epochs": args.epochs,
@@ -94,7 +94,7 @@ imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
 
 optimizer = optim.Adam([imps], 0.1)
-grad_fn = MoCo()
+grad_fn = RLW()
 grad_fn.init_param()
 
 h_loss = torch.zeros(1).to(device)
@@ -128,7 +128,7 @@ for epoch in range(args.epochs):
     X12 = X_imputed[:SITE1_CELL + SITE2_CELL][indices1]
     X3  = X_imputed[-SITE3_CELL:][indices2]
 
-    if epoch >= 0:
+    if epoch >= args.start_aux:
         labels1 = calculate_cluster_labels(X12)
         labels2 = calculate_cluster_labels(X3)
         ### calculate cluster centroids
@@ -139,11 +139,13 @@ for epoch in range(args.epochs):
     
     cells_loss = SamplesLoss()(X12, X3)
     losses = torch.stack([cells_loss, h_loss])
-    sol = grad_fn.backward(losses, MoCo_beta=0.5, MoCo_beta_sigma=0.5, MoCo_gamma=0.1, MoCo_gamma_sigma=0.5, MoCo_rho=0)
-    print(sol)
+    # sol = grad_fn.backward(losses)
+    # print(sol)
+    sol = [1, 0]
     loss = sol[0] * cells_loss + sol[1] * h_loss
     print(f"{epoch}: lr = {lr}, omics_loss = {omics_loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
     
+    loss.backward()
     optimizer.step()
 
     if (epoch + 1) % args.eval_interval == 0 and args.use_wandb is True:
