@@ -112,8 +112,7 @@ for epoch in range(args.epochs):
     X_imputed = X.detach().clone()
     X_imputed[mask] = imps
 
-    # if epoch == 0 and args.use_wandb is True:
-    if epoch == 0:
+    if epoch == 0 and args.use_wandb is True:
         ### pearson
         pearson_corr = pearsonr(X_imputed[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy(), ground_truth[-SITE3_CELL:, :FILLED_GEX][nonzero_mask31].detach().cpu().numpy())[0]
         ### mae & rmse
@@ -125,7 +124,7 @@ for epoch in range(args.epochs):
         citeseq.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
         ari, nmi, purity, jaccard = cluster_with_leiden(citeseq, resolution_values=args.resolution_values)
         print(f"Initial pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
-        # wandb.log({"Iteration": 0, "loss": 0, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity})
+        wandb.log({"Iteration": 0, "loss": 0, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity})
 
     indices1 = torch.randperm(SITE1_CELL + SITE2_CELL, device=device)[:args.batch_size]
     indices2 = torch.randperm(SITE3_CELL, device=device)[:args.batch_size]

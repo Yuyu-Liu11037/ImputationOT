@@ -14,17 +14,18 @@ from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
-from utils import tools
+from imputationot.utils import correlation_matrix, correlation_matrix_distance, calculate_mae_rmse, calculate_cluster_labels, calculate_cluster_centroids, cluster_with_leiden
+from imputationot.weighting import RLW
 
 def str_to_float_list(arg):
     return [float(x) for x in arg.split(',')]
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--use_wandb", action="store_true", default=False)
-parser.add_argument("--aux_weight", type=float, default=0)
+parser.add_argument("--use_cluster", action="store_true", default=False)
 parser.add_argument("--epochs", type=int, default=150)
 parser.add_argument("--eval_interval", type=int, default=5)
-parser.add_argument("--start_aux", type=int, default=20)
+parser.add_argument("--weights", type=str_to_float_list, default=[1,0])
 parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
 parser.add_argument("--resolution_values", type=str_to_float_list, default=[0.01, 0.05])
@@ -34,7 +35,7 @@ parser.add_argument("--target_batch", type=int, default=2, help="Batch number to
 parser.add_argument("--target_type", type=int, default=1, help="Data type to impute")
 
 parser.add_argument("--wandb_group", type=str, default="pbmc-3p-rna")
-parser.add_argument("--wandb_job", type=str, choices=["main", "ablation", "aux"], default="main")
+parser.add_argument("--wandb_job", type=str, choices=["main", "ablation", "aux"], default="aux")
 parser.add_argument("--wandb_name", type=str, default="exp")
 args = parser.parse_args()
 
@@ -58,15 +59,10 @@ if args.use_wandb is True:
         project="ot",
         group=args.wandb_group,
         job_type=args.wandb_job,
-        name=args.wandb_name,
-        config={
-            "dataset": "pbmc",
-            "epochs": args.epochs,
-            "h_loss weight": args.aux_weight
-        }
+        name=args.wandb_name
     )
 
-pbmc = ad.read_h5ad("/workspace/ImputationOT/data/pbmc2.h5ad") 
+pbmc = ad.read_h5ad("/workspace/ImputationOT/imputationot/data/pbmc2.h5ad") 
 pbmc.var_names_make_unique()
 
 donors = pbmc.obs["donor"].unique()
@@ -114,7 +110,6 @@ mean_values = torch.sum(X_source[:, :num_rna] * nonzero_mask_source, dim=0) / (t
 imps = mean_values.repeat(X_target.shape[0]).to(device)
 imps += torch.randn(imps.shape, device=device) * 0.1
 imps.requires_grad = True
-# imps = imps.view(X_target[:, :num_rna].shape).detach().requires_grad_()
 
 def lr_lambda(epoch):
     if epoch < 10:
@@ -126,18 +121,21 @@ def lr_lambda(epoch):
 
 optimizer = optim.Adam([imps], 1.0)
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+grad_fn = RLW()
+grad_fn.init_param()
 
 h_loss = torch.zeros(1).to(device)
 cells_loss = torch.zeros(1).to(device)
 
 print(f"Start optimizing: use batch(es) {args.source_batches} to impute batch {args.target_batch}")
 for epoch in range(args.epochs):
+    optimizer.zero_grad()
     X_imputed = X_target.detach().clone()
     X_imputed[mask] = imps
 
     if epoch == 0 and args.use_wandb is True:
         pearson_corr = pearsonr(X_imputed[:, :num_rna][nonzero_mask_target].detach().cpu().numpy(), ground_truth[:, :num_rna][nonzero_mask_target].detach().cpu().numpy())[0]
-        mae, rmse = tools.calculate_mae_rmse(X_imputed[:, :num_rna], ground_truth[:, :num_rna], nonzero_mask_target)
+        mae, rmse = calculate_mae_rmse(X_imputed[:, :num_rna], ground_truth[:, :num_rna], nonzero_mask_target)
         X_full = []
         for i in range(1, len(batch_sizes) + 1):
             if i in source_batches:
@@ -148,7 +146,7 @@ for epoch in range(args.epochs):
                 tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
             X_full.append(tmp)
         pbmc.X = np.vstack(X_full)
-        ari, nmi, purity, jaccard = tools.cluster_with_leiden(pbmc, resolution_values=args.resolution_values)
+        ari, nmi, purity, jaccard = cluster_with_leiden(pbmc, resolution_values=args.resolution_values, tag="celltype.l1")
         print(f"Initial pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
         wandb.log({"Iteration": 0, "loss": 0, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity, "jaccard": jaccard})
 
@@ -157,24 +155,26 @@ for epoch in range(args.epochs):
     X1 = X_source[indices1]
     X2 = X_imputed[indices2]
 
-    if epoch >= args.start_aux:
+    if args.use_cluster is True:
         ### calculate cluster results
-        labels1 = tools.calculate_cluster_labels(X1, resolution=0.9)
-        labels2 = tools.calculate_cluster_labels(X2, resolution=0.9)
+        labels1 = calculate_cluster_labels(X1, resolution=0.07)
+        labels2 = calculate_cluster_labels(X2, resolution=0.07)
         ### calculate cluster centroids
-        centroids1 = tools.calculate_cluster_centroids(X1, labels1)
-        centroids2 = tools.calculate_cluster_centroids(X2, labels2)
+        centroids1 = calculate_cluster_centroids(X1, labels1)
+        centroids2 = calculate_cluster_centroids(X2, labels2)
         ### calculate cluster loss
         h_loss = SamplesLoss()(centroids1, centroids2)
     
-    w_h = 0 if epoch < args.start_aux else args.aux_weight
     cells_loss = SamplesLoss()(X1, X2)
-    loss = cells_loss + w_h * h_loss
+    # loss = args.weights[0] * cells_loss + args.weights[1] * h_loss
+    losses = torch.stack([cells_loss, h_loss])
+    sol = grad_fn.backward(losses)
+    print(sol)
+    loss = sol[0] * cells_loss + sol[1] * h_loss
     lr = lr_lambda(epoch)
     print(f"{epoch}: lr = {lr:.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
-    optimizer.zero_grad()
-    loss.backward()
+    # loss.backward()
     optimizer.step()
     scheduler.step()
 
@@ -183,7 +183,7 @@ for epoch in range(args.epochs):
         X_imputed[mask] = imps
         
         pearson_corr = pearsonr(X_imputed[:, :num_rna][nonzero_mask_target].detach().cpu().numpy(), ground_truth[:, :num_rna][nonzero_mask_target].detach().cpu().numpy())[0]
-        mae, rmse = tools.calculate_mae_rmse(X_imputed[:, :num_rna], ground_truth[:, :num_rna], nonzero_mask_target)
+        mae, rmse = calculate_mae_rmse(X_imputed[:, :num_rna], ground_truth[:, :num_rna], nonzero_mask_target)
         X_full = []
         for i in range(1, len(batch_sizes) + 1):
             if i in source_batches:
@@ -194,6 +194,6 @@ for epoch in range(args.epochs):
                 tmp = X[batch_sizes_cumsum[i-1]:batch_sizes_cumsum[i]].detach().cpu().numpy()
             X_full.append(tmp)
         pbmc.X = np.vstack(X_full)
-        ari, nmi, purity, jaccard = tools.cluster_with_leiden(pbmc, resolution_values=args.resolution_values)
+        ari, nmi, purity, jaccard = cluster_with_leiden(pbmc, resolution_values=args.resolution_values, tag="celltype.l1")
         print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity, "jaccard": jaccard})
