@@ -1,6 +1,5 @@
-.ipynb_checkpoints
-data/
-imputationot/multiome/log1p_multiome.h5ad
+**/*data*/
 **/*wandb*/
 **/*pycache*/
 .DS_Store
+.ipynb_checkpoints
