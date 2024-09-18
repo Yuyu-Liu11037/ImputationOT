@@ -60,7 +60,7 @@ multiome.var_names_make_unique()
 #####################################################################################################################################
 ### preprocess
 adata_GEX = multiome[:, multiome.var['feature_types'] == 'GEX'].copy()
-adata_ATAC = multiome[:, multiome.var['feature_types'] == 'num_atac'].copy()
+adata_ATAC = multiome[:, multiome.var['feature_types'] == 'ATAC'].copy()
 ### step 1: normalize
 sc.pp.normalize_total(adata_GEX, target_sum=1e4)
 sc.pp.normalize_total(adata_ATAC, target_sum=1e4)
