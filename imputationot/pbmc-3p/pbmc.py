@@ -10,12 +10,12 @@ import wandb
 import sys
 import random
 import argparse
+import time
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 from imputationot.utils import correlation_matrix, correlation_matrix_distance, calculate_mae_rmse, calculate_cluster_labels, calculate_cluster_centroids, cluster_with_leiden
-from imputationot.weighting import RLW
 
 def str_to_float_list(arg):
     return [float(x) for x in arg.split(',')]
@@ -23,12 +23,12 @@ def str_to_float_list(arg):
 parser = argparse.ArgumentParser()
 parser.add_argument("--use_wandb", action="store_true", default=False)
 parser.add_argument("--use_cluster", action="store_true", default=False)
-parser.add_argument("--epochs", type=int, default=150)
+parser.add_argument("--epochs", type=int, default=200)
 parser.add_argument("--eval_interval", type=int, default=5)
 parser.add_argument("--weights", type=str_to_float_list, default=[1,0])
 parser.add_argument("--batch_size", type=int, default=3000)
 parser.add_argument("--seed", type=int, default=2024)
-parser.add_argument("--resolution_values", type=str_to_float_list, default=[0.01, 0.05])
+parser.add_argument("--resolution_values", type=str_to_float_list, default=[0.01, 0.05, 0.07, 0.1])
 
 parser.add_argument("--source_batches", type=str, default="1", help="Impute batch size range from 1 to 8")
 parser.add_argument("--target_batch", type=int, default=2, help="Batch number to impute")
@@ -121,13 +121,12 @@ def lr_lambda(epoch):
 
 optimizer = optim.Adam([imps], 1.0)
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
-grad_fn = RLW()
-grad_fn.init_param()
 
 h_loss = torch.zeros(1).to(device)
 cells_loss = torch.zeros(1).to(device)
 
 print(f"Start optimizing: use batch(es) {args.source_batches} to impute batch {args.target_batch}")
+start_time = time.time()
 for epoch in range(args.epochs):
     optimizer.zero_grad()
     X_imputed = X_target.detach().clone()
@@ -166,15 +165,11 @@ for epoch in range(args.epochs):
         h_loss = SamplesLoss()(centroids1, centroids2)
     
     cells_loss = SamplesLoss()(X1, X2)
-    # loss = args.weights[0] * cells_loss + args.weights[1] * h_loss
-    losses = torch.stack([cells_loss, h_loss])
-    sol = grad_fn.backward(losses)
-    print(sol)
-    loss = sol[0] * cells_loss + sol[1] * h_loss
+    loss = args.weights[0] * cells_loss + args.weights[1] * h_loss
     lr = lr_lambda(epoch)
     print(f"{epoch}: lr = {lr:.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
-    # loss.backward()
+    loss.backward()
     optimizer.step()
     scheduler.step()
 
