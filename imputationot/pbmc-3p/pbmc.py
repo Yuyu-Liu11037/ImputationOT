@@ -93,6 +93,8 @@ num_rna = adata_RNA.X.shape[1]
 pbmc = ad.concat([adata_RNA, adata_ADT], axis=1, merge="first")
 print(f"Finish preprocessing\n")
 #####################################################################################################################################
+print(pbmc)
+sys.exit()
 
 X = pbmc.X.toarray()
 X = torch.tensor(X).to(device)
@@ -192,3 +194,4 @@ for epoch in range(args.epochs):
         ari, nmi, purity, jaccard = cluster_with_leiden(pbmc, resolution_values=args.resolution_values, tag="celltype.l1")
         print(f"Iteration {epoch + 1}/{args.epochs}: loss: {loss.item():.4f}, pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity, "jaccard": jaccard})
+print(f"Time usage: {time.time() - start_time:.2f}")

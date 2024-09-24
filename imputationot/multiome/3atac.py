@@ -9,6 +9,7 @@ import sys
 import os
 import random
 import argparse
+import time
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 
@@ -104,6 +105,7 @@ cells_loss = torch.zeros(1).to(device)
 lr = 0.1
 
 print("Start optimizing")
+start_time = time.time()
 for epoch in range(args.epochs):
     optimizer.zero_grad()
     X_imputed = X.detach().clone()
@@ -160,3 +162,4 @@ for epoch in range(args.epochs):
         ari, nmi, purity, jaccard = cluster_with_leiden(multiome, resolution_values=args.resolution_values)
         print(f"pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity})
+print(f"Time usage: {time.time() - start_time:.2f}")
