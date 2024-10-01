@@ -10,6 +10,8 @@ import os
 import random
 import argparse
 import time
+import matplotlib.pyplot as plt
+import seaborn as sns
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 
@@ -104,6 +106,19 @@ h_loss = torch.zeros(1).to(device)
 cells_loss = torch.zeros(1).to(device)
 lr = 0.1
 
+### Draw UMAP
+# X_imputed = X.detach().clone()
+# X_imputed[mask] = imps
+# multiome.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
+# _, _, _, _ = cluster_with_leiden(multiome, resolution_values=[0.6])
+# sc.tl.umap(multiome)
+# plt.figure(figsize=(8, 6))
+# sc.pl.umap(multiome, color='leiden', show=False, title='RAW')
+# plt.savefig(f"/workspace/ImputationOT/imputationot/visualization/umap_multiome_raw.png", format="png")
+# plt.close()
+# print(f"UMAP plot saved as 'umap_multiome_raw.png'.")
+# sys.exit()
+
 print("Start optimizing")
 start_time = time.time()
 for epoch in range(args.epochs):
@@ -162,3 +177,14 @@ for epoch in range(args.epochs):
         ari, nmi, purity, jaccard = cluster_with_leiden(multiome, resolution_values=args.resolution_values)
         print(f"pearson: {pearson_corr:.4f}, mae: {mae:.4f}, rmse: {rmse:.4f}, ari: {ari:.4f}, nmi: {nmi:.4f}, purity: {purity:.4f}, jaccard: {jaccard:.4f}")
         wandb.log({"Iteration": epoch + 1, "loss": loss, "pearson": pearson_corr, "mae": mae, "rmse": rmse, "ari": ari, "nmi": nmi, "purity": purity})
+
+X_imputed = X.detach().clone()
+X_imputed[mask] = imps
+multiome.X = np.vstack((X_imputed.detach().cpu().numpy(), X4))
+_, _, _, _ = cluster_with_leiden(multiome, resolution_values=[0.6])
+sc.tl.umap(multiome)
+plt.figure(figsize=(8, 6))
+sc.pl.umap(multiome, color='leiden', show=False, title='RAW')
+plt.savefig(f"/workspace/ImputationOT/imputationot/visualization/umap_multiome.png", format="png")
+plt.close()
+print(f"UMAP plot saved as 'umap_multiome.png'.")
