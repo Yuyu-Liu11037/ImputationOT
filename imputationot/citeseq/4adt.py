@@ -13,7 +13,7 @@ import time
 from scipy.stats import pearsonr
 from geomloss import SamplesLoss
 
-from imputationot.utils import correlation_matrix, correlation_matrix_distance, calculate_mae_rmse, calculate_cluster_labels, calculate_cluster_centroids, cluster_with_leiden
+from imputationot.utils import correlation_matrix, correlation_matrix_distance, calculate_mae_rmse, calculate_cluster_labels, calculate_cluster_centroids, cluster_with_leiden, visualize_clusters
 
 def str_to_float_list(arg):
     return [float(x) for x in arg.split(',')]
@@ -149,11 +149,14 @@ for epoch in range(args.epochs):
     
     cells_loss = SamplesLoss()(X12, X4)
     loss = args.weights[0] * cells_loss + args.weights[1] * h_loss
-    print(f"{epoch}: cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
+    print(f"{epoch}: loss = {loss.item():.4f}, cells_loss = {cells_loss.item():.4f}, h_loss = {h_loss.item():.4f}")
 
     loss.backward()
     optimizer.step()
     # scheduler.step()
+
+    if epoch % 20 == 0:
+        visualize_clusters(X4, labels2, f"/workspace/ImputationOT/imputationot/visualization/use_cluster/plot{epoch}.png")
 
     if (epoch + 1) % args.eval_interval == 0 and args.use_wandb is True:
         X_imputed = X.detach().clone()

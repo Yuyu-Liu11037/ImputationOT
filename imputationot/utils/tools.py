@@ -3,10 +3,14 @@ import anndata as ad
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import seaborn as sns
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, mean_absolute_error, mean_squared_error, confusion_matrix, jaccard_score
 from math import sqrt
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import umap
 
 
 random_seed = 2024
@@ -14,6 +18,52 @@ np.random.seed(random_seed)
 torch.manual_seed(random_seed)
 sc.settings.seed = random_seed
 torch.cuda.manual_seed(random_seed)
+
+
+def visualize_clusters(data, labels, save_path):
+    """
+    Visualize single-cell clusters and their centers from a high-dimensional PyTorch tensor using UMAP.
+    
+    Parameters:
+        data (torch.Tensor): 2D PyTorch tensor with shape (n_samples, n_features).
+        labels (list or torch.Tensor): List or tensor indicating the cluster label for each row in `data`.
+        save_path (str): File path to save the plot.
+    """
+    # Convert data and labels to numpy for easier handling
+    data_np = data.detach().cpu().numpy()
+    labels_np = np.array(labels)
+    
+    # Perform UMAP dimensionality reduction to 2D
+    reducer = umap.UMAP(n_components=2, random_state=42)
+    data_2d = reducer.fit_transform(data_np)
+    
+    # Calculate cluster centers in the reduced 2D space
+    unique_labels = np.unique(labels_np)
+    cluster_centers = np.array([data_2d[labels_np == label].mean(axis=0) for label in unique_labels])
+
+    # Plot settings
+    plt.figure(figsize=(10, 8))
+    sns.set(style="whitegrid")
+
+    # Scatter plot for each cluster without adding legend labels
+    for label in unique_labels:
+        cluster_data = data_2d[labels_np == label]
+        plt.scatter(cluster_data[:, 0], cluster_data[:, 1], alpha=0.6, s=5)
+    
+    # Plot cluster centers and add a single legend entry
+    plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], 
+                color='black', marker='X', s=100, label='Cluster Centers')
+    
+    # Add titles and labels
+    plt.title('Single-cell Cluster Visualization with Cluster Centers')
+    plt.xlabel('UMAP Component 1')
+    plt.ylabel('UMAP Component 2')
+    plt.legend()  # Only show the cluster centers in the legend
+
+    # Save the plot to the specified path
+    plt.savefig(save_path, format='png', dpi=300)
+    plt.close()
+    print(f"Figure saved to {save_path}")
 
 
 def correlation_matrix(X):

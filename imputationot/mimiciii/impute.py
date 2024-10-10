@@ -6,11 +6,59 @@ import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import seaborn as sns
 import pandas as pd
 from scipy import stats
 from geomloss import SamplesLoss
 from scipy.stats import pearsonr
 import sys
+from sklearn.decomposition import PCA
+
+
+def visualize_clusters_with_centers(data, labels, save_path):
+    """
+    Visualize clusters and their centers from a high-dimensional PyTorch tensor.
+    
+    Parameters:
+        data (torch.Tensor): 2D PyTorch tensor with shape (n_samples, n_features).
+        labels (list or torch.Tensor): List or tensor indicating the cluster label for each row in `data`.
+        save_path (str): File path to save the plot.
+    """
+    # Convert data and labels to numpy for easier handling
+    data_np = data.numpy()
+    labels_np = np.array(labels)
+    
+    # Perform PCA to reduce data to 2 dimensions
+    pca = PCA(n_components=2)
+    data_2d = pca.fit_transform(data_np)
+    
+    # Calculate cluster centers in the reduced 2D space
+    unique_labels = np.unique(labels_np)
+    cluster_centers = np.array([data_2d[labels_np == label].mean(axis=0) for label in unique_labels])
+
+    # Plot settings
+    plt.figure(figsize=(8, 6))
+    sns.set(style="whitegrid")
+
+    # Scatter plot for each cluster
+    for label in unique_labels:
+        cluster_data = data_2d[labels_np == label]
+        plt.scatter(cluster_data[:, 0], cluster_data[:, 1], label=f'Cluster {label}', alpha=0.6)
+    
+    # Plot cluster centers
+    plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], 
+                color='black', marker='X', s=100, label='Cluster Centers')
+    
+    # Add titles and labels
+    plt.title('Cluster Visualization with Cluster Centers')
+    plt.xlabel('PCA Component 1')
+    plt.ylabel('PCA Component 2')
+    plt.legend()
+
+    # Save the plot to the specified path
+    plt.savefig(save_path, format='png')
+    plt.close()
 
 
 device = "cuda:0"
